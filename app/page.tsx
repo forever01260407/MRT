@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 
 type RailStatus = "normal" | "warning" | "critical" | "unknown";
 type Direction = "up" | "down";
@@ -256,7 +257,9 @@ function calculateRouteLayout(width: number, height: number): RouteLayout {
   };
 }
 
-function HistoryChart({ device }: { device: Device }) {
+const comparisonColors = ["#6255df", "#0fa878", "#e8a321", "#ed4767", "#3288e8", "#9b62d9", "#00a6a6", "#d06b9f"];
+
+function HistoryChart({ devices }: { devices: Device[] }) {
   const chartRoot = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -266,17 +269,20 @@ function HistoryChart({ device }: { device: Device }) {
     void import("echarts").then((echarts) => {
       if (disposed || !chartRoot.current) return;
       const styles = getComputedStyle(document.documentElement);
-      const colorMap: Record<RailStatus, string> = {
-        normal: styles.getPropertyValue("--success").trim(),
-        warning: styles.getPropertyValue("--warning").trim(),
-        critical: styles.getPropertyValue("--danger").trim(),
-        unknown: styles.getPropertyValue("--muted").trim(),
-      };
       const instance = echarts.init(chartRoot.current);
       chart = instance;
       instance.setOption({
         animationDuration: 420,
-        grid: { left: 43, right: 12, top: 28, bottom: 30 },
+        color: comparisonColors,
+        legend: {
+          top: 2,
+          left: 0,
+          itemWidth: 18,
+          itemHeight: 8,
+          textStyle: { color: styles.getPropertyValue("--ink-soft").trim(), fontSize: 10 },
+          data: devices.map((device) => device.id),
+        },
+        grid: { left: 43, right: 12, top: devices.length > 1 ? 48 : 36, bottom: 30 },
         tooltip: { trigger: "axis", valueFormatter: (value: unknown) => `${value} L` },
         xAxis: {
           type: "category",
@@ -294,23 +300,23 @@ function HistoryChart({ device }: { device: Device }) {
           axisLabel: { color: styles.getPropertyValue("--muted").trim(), formatter: "{value} L", fontSize: 11 },
           splitLine: { lineStyle: { color: styles.getPropertyValue("--line").trim() } },
         },
-        series: [{
+        series: devices.map((device, index) => ({
           name: device.id,
           type: "line",
-          smooth: 0.35,
+          smooth: 0.32,
+          symbol: device.direction === "up" ? "circle" : "diamond",
           symbolSize: 8,
           data: device.history,
-          lineStyle: { width: 3, color: colorMap[device.status] },
-          itemStyle: { color: colorMap[device.status] },
-          areaStyle: { color: colorMap[device.status], opacity: 0.11 },
-          markLine: {
+          lineStyle: { width: 3, type: device.direction === "up" ? "solid" : "dashed" },
+          areaStyle: devices.length === 1 ? { opacity: 0.1 } : undefined,
+          markLine: index === 0 ? {
             silent: true,
             symbol: "none",
             label: { formatter: "警戒 20 L", color: styles.getPropertyValue("--danger").trim() },
             lineStyle: { color: styles.getPropertyValue("--danger").trim(), type: "dashed" },
             data: [{ yAxis: 20 }],
-          },
-        }],
+          } : undefined,
+        })),
       });
 
       const resize = () => instance.resize();
@@ -326,16 +332,18 @@ function HistoryChart({ device }: { device: Device }) {
       disposed = true;
       chart?.dispose();
     };
-  }, [device]);
+  }, [devices]);
 
-  return <div className="history-chart" ref={chartRoot} role="img" aria-label={`${device.id} 最近七次油量歷史折線圖`} />;
+  return <div className="history-chart" ref={chartRoot} role="img" aria-label={`${devices.map((device) => device.id).join("、")} 最近七次油量比較折線圖`} />;
 }
 
 export default function Home() {
   const topologyRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
   const [mapSize, setMapSize] = useState({ width: 1000, height: 680 });
   const [selectedSegmentId, setSelectedSegmentId] = useState("Y10-Y11");
   const [selectedDeviceId, setSelectedDeviceId] = useState("LB4");
+  const [comparedDeviceIds, setComparedDeviceIds] = useState<string[]>(["LB4"]);
 
   useEffect(() => {
     const element = topologyRef.current;
@@ -355,6 +363,12 @@ export default function Home() {
   const selectedDevice = useMemo(
     () => selectedSegment.devices.find((device) => device.id === selectedDeviceId) ?? null,
     [selectedDeviceId, selectedSegment],
+  );
+  const comparedDevices = useMemo(
+    () => comparedDeviceIds
+      .map((id) => selectedSegment.devices.find((device) => device.id === id))
+      .filter((device): device is Device => Boolean(device)),
+    [comparedDeviceIds, selectedSegment],
   );
   const selectedSegmentState = segmentStatus(selectedSegment);
   const upDevices = devicesByDirection(selectedSegment, "up");
@@ -377,13 +391,51 @@ export default function Home() {
   };
 
   const selectSegment = (segment: Segment) => {
+    const defaultDevice = chooseDefaultDevice(segment);
     setSelectedSegmentId(segment.id);
-    setSelectedDeviceId(chooseDefaultDevice(segment)?.id ?? "");
+    setSelectedDeviceId(defaultDevice?.id ?? "");
+    setComparedDeviceIds(defaultDevice ? [defaultDevice.id] : []);
   };
 
   const selectDevice = (segment: Segment, device: Device) => {
     setSelectedSegmentId(segment.id);
     setSelectedDeviceId(device.id);
+    setComparedDeviceIds([device.id]);
+  };
+
+  const locateDeviceOnMap = (segment: Segment, device: Device) => {
+    selectDevice(segment, device);
+    window.requestAnimationFrame(() => {
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      workspaceRef.current?.scrollIntoView({
+        behavior: reduceMotion ? "auto" : "smooth",
+        block: "start",
+      });
+    });
+  };
+
+  const focusDevice = (segment: Segment, device: Device) => {
+    if (segment.id !== selectedSegmentId) {
+      selectDevice(segment, device);
+      return;
+    }
+    setSelectedDeviceId(device.id);
+    if (!comparedDeviceIds.includes(device.id)) {
+      setComparedDeviceIds([...comparedDeviceIds, device.id]);
+    }
+  };
+
+  const toggleComparedDevice = (device: Device) => {
+    const isCompared = comparedDeviceIds.includes(device.id);
+    const nextIds = isCompared
+      ? comparedDeviceIds.filter((id) => id !== device.id)
+      : [...comparedDeviceIds, device.id];
+
+    if (!nextIds.length) return;
+    setComparedDeviceIds(nextIds);
+    if (!nextIds.includes(selectedDeviceId)) {
+      setSelectedDeviceId(nextIds[0]);
+    }
   };
 
   const renderDeviceLane = (segment: Segment, direction: Direction, angle: number) => {
@@ -392,11 +444,11 @@ export default function Home() {
     if (!laneDevices.length) {
       return <span className={`fallback-track ${fallback}`} aria-hidden="true"></span>;
     }
-    return laneDevices.map((device) => (
+    return [...laneDevices].reverse().map((device) => (
       <button
         type="button"
         key={device.id}
-        className={`device-track ${device.status} ${selectedDeviceId === device.id ? "selected" : ""}`}
+        className={`device-track ${device.status} ${selectedDeviceId === device.id ? "selected" : ""} ${comparedDeviceIds.includes(device.id) ? "compared" : ""}`}
         onClick={(event) => {
           event.stopPropagation();
           selectDevice(segment, device);
@@ -411,6 +463,38 @@ export default function Home() {
       </button>
     ));
   };
+
+  const renderDeviceCards = (laneDevices: Device[]) => laneDevices.map((device) => {
+    const isFocused = selectedDeviceId === device.id;
+    const isCompared = comparedDeviceIds.includes(device.id);
+    return (
+      <div
+        className={`device-card ${device.status} ${isFocused ? "selected" : ""} ${isCompared ? "compare-active" : ""}`}
+        key={device.id}
+      >
+        <button
+          type="button"
+          className="device-card-main"
+          onClick={() => focusDevice(selectedSegment, device)}
+          aria-label={`查看 ${device.id} 詳細資料`}
+        >
+          <span><i></i>{device.id}</span>
+          <strong>{device.value} L</strong>
+          <small>{formatChange(device.change)}</small>
+        </button>
+        <button
+          type="button"
+          className={`compare-toggle ${isCompared ? "checked" : ""}`}
+          onClick={() => toggleComparedDevice(device)}
+          aria-pressed={isCompared}
+          aria-label={`${isCompared ? "取消" : "加入"} ${device.id} 趨勢比較`}
+          title={`${isCompared ? "取消" : "加入"}圖表比較`}
+        >
+          {isCompared ? "✓" : ""}
+        </button>
+      </div>
+    );
+  });
 
   return (
     <main className="app-shell">
@@ -435,7 +519,7 @@ export default function Home() {
           <div>
             <p className="eyebrow dark">LINE CONDITION OVERVIEW</p>
             <h2>從軌道線段直接定位設備</h2>
-            <p>區間長度依設備數量自動配置；點選 MOK／LB 小線段，右側顯示該設備唯一一張歷史曲線。</p>
+            <p>區間長度依設備數量自動配置；點軌道查看單台設備，再勾選同區間設備即可在一張圖比較多條曲線。</p>
           </div>
           <div className="updated-at">資料時間 <strong>2026-07-24 16:30</strong></div>
         </div>
@@ -447,7 +531,7 @@ export default function Home() {
           <article className="summary-card"><span>設備涵蓋區間</span><strong>5/13</strong><small>無設備資料不等於正常</small></article>
         </section>
 
-        <section className="workspace-grid">
+        <section className="workspace-grid" ref={workspaceRef}>
           <article className="panel route-panel">
             <div className="panel-heading">
               <div>
@@ -540,7 +624,7 @@ export default function Home() {
                             <button
                               type="button"
                               key={device.id}
-                              className={`${device.status} ${selectedDeviceId === device.id ? "selected" : ""}`}
+                              className={`${device.status} ${selectedDeviceId === device.id ? "selected" : ""} ${comparedDeviceIds.includes(device.id) ? "compared" : ""}`}
                               onClick={() => selectDevice(nextSegment, device)}
                             >{device.id}</button>
                           ))}
@@ -572,7 +656,7 @@ export default function Home() {
             <section className="device-overview" aria-label="區間設備總覽">
               <div className="section-title-row">
                 <div><span className="panel-kicker">區間設備</span><h4>{selectedSegment.devices.length || 0} 台設備</h4></div>
-                <small>點設備切換下方圖表</small>
+                <small>點卡片查看；右上角勾選可疊加比較</small>
               </div>
 
               {selectedSegment.devices.length ? (
@@ -580,31 +664,13 @@ export default function Home() {
                   <div className="device-direction-group">
                     <div className="device-direction-title"><span className="direction-mark up"></span><strong>MOK 上行</strong><small>{statusText[directionStatus(selectedSegment, "up")]}</small></div>
                     <div className="device-card-grid">
-                      {upDevices.map((device) => (
-                        <button
-                          type="button"
-                          key={device.id}
-                          className={`device-card ${device.status} ${selectedDeviceId === device.id ? "selected" : ""}`}
-                          onClick={() => selectDevice(selectedSegment, device)}
-                        >
-                          <span><i></i>{device.id}</span><strong>{device.value} L</strong><small>{formatChange(device.change)}</small>
-                        </button>
-                      ))}
+                      {renderDeviceCards(upDevices)}
                     </div>
                   </div>
                   <div className="device-direction-group">
                     <div className="device-direction-title"><span className="direction-mark down"></span><strong>LB 下行</strong><small>{statusText[directionStatus(selectedSegment, "down")]}</small></div>
                     <div className="device-card-grid">
-                      {downDevices.map((device) => (
-                        <button
-                          type="button"
-                          key={device.id}
-                          className={`device-card ${device.status} ${selectedDeviceId === device.id ? "selected" : ""}`}
-                          onClick={() => selectDevice(selectedSegment, device)}
-                        >
-                          <span><i></i>{device.id}</span><strong>{device.value} L</strong><small>{formatChange(device.change)}</small>
-                        </button>
-                      ))}
+                      {renderDeviceCards(downDevices)}
                     </div>
                   </div>
                 </>
@@ -617,7 +683,7 @@ export default function Home() {
               <section className="selected-device-detail">
                 <div className="selected-device-heading">
                   <div>
-                    <span className="panel-kicker">目前顯示設備</span>
+                    <span className="panel-kicker">目前查看設備</span>
                     <h4>{selectedDevice.id}</h4>
                   </div>
                   <span className={`status-pill ${selectedDevice.status}`}>{statusText[selectedDevice.status]}</span>
@@ -627,8 +693,16 @@ export default function Home() {
                   <div><span>相比前次</span><strong className={selectedDevice.change < 0 ? "danger-text" : ""}>{formatChange(selectedDevice.change)}</strong></div>
                   <div><span>所在軌道</span><strong>{selectedDevice.direction === "up" ? "MOK 上行" : "LB 下行"}</strong></div>
                 </div>
-                <div className="chart-heading"><strong>{selectedDevice.id} 最近七次油量趨勢</strong><span>單位：L</span></div>
-                <HistoryChart device={selectedDevice} />
+                <div className="comparison-strip">
+                  <span>圖表已勾選</span>
+                  <div>{comparedDevices.map((device, index) => (
+                    <strong key={device.id} style={{ "--series-color": comparisonColors[index % comparisonColors.length] } as CSSProperties}>
+                      <i></i>{device.id}
+                    </strong>
+                  ))}</div>
+                </div>
+                <div className="chart-heading"><strong>{comparedDevices.length > 1 ? `${comparedDevices.length} 台設備趨勢比較` : `${selectedDevice.id} 最近七次油量趨勢`}</strong><span>單位：L</span></div>
+                <HistoryChart devices={comparedDevices} />
                 <div className={`detail-note ${selectedDevice.status}`}>
                   <strong>維修提示</strong>
                   <p>{selectedDevice.status === "critical" ? "請優先核對現場油量、噴塗週期與最近一次補充紀錄。" : selectedDevice.status === "warning" ? "目前接近警戒值，請持續觀察下降速度並安排複查。" : "設備目前正常，持續依既定週期監測。"}</p>
@@ -654,7 +728,7 @@ export default function Home() {
                 <span><b className={device.status === "critical" ? "danger-text" : "warning-text"}>{device.value} L</b></span>
                 <span>{stations[segment.from].id} {stations[segment.from].name}－{stations[segment.to].id} {stations[segment.to].name}</span>
                 <span>{formatChange(device.change)}</span>
-                <button type="button" className="table-action" onClick={() => selectDevice(segment, device)}>在圖上定位</button>
+                <button type="button" className="table-action" onClick={() => locateDeviceOnMap(segment, device)}>在圖上定位</button>
               </div>
             ))}
           </div>
