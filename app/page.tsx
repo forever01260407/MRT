@@ -538,8 +538,6 @@ export default function Home() {
         </div>
         <nav className="topnav" aria-label="主要功能">
           <button type="button" className="nav-item active">全線總覽</button>
-          <button type="button" className="nav-item">潤滑設備</button>
-          <button type="button" className="nav-item">磨耗紀錄</button>
         </nav>
         <div className="sync-state"><span className="pulse-dot"></span>UI 草圖 · 模擬資料</div>
       </header>
@@ -558,7 +556,6 @@ export default function Home() {
           <article className="summary-card danger-card"><span>需處理設備</span><strong>{criticalCount}</strong><small>優先安排現場複查</small></article>
           <article className="summary-card warning-card"><span>注意設備</span><strong>{warningCount}</strong><small>持續觀察下降趨勢</small></article>
           <article className="summary-card"><span>固定潤滑設備</span><strong>20</strong><small>MOK 10 · LB 10</small></article>
-          <article className="summary-card"><span>設備涵蓋區間</span><strong>5/13</strong><small>無設備資料不等於正常</small></article>
         </section>
 
         <section className="workspace-grid" ref={workspaceRef}>
@@ -750,7 +747,6 @@ export default function Home() {
                   <strong>維修提示</strong>
                   <p>{selectedDevice.status === "critical" ? "請優先核對現場油量、噴塗週期與最近一次補充紀錄。" : selectedDevice.status === "warning" ? "目前接近警戒值，請持續觀察下降速度並安排複查。" : "設備目前正常，持續依既定週期監測。"}</p>
                 </div>
-                <button type="button" className="primary-action">開啟 {selectedDevice.id} 完整設備紀錄</button>
               </section>
             ) : (
               <div className="chart-empty-state"><strong>尚未選取設備</strong><span>請點擊地圖上的 MOK／LB 小線段。</span></div>
