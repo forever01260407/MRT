@@ -259,7 +259,7 @@ function calculateRouteLayout(width: number, height: number): RouteLayout {
 
 const comparisonColors = ["#6255df", "#0fa878", "#e8a321", "#ed4767", "#3288e8", "#9b62d9", "#00a6a6", "#d06b9f"];
 
-function HistoryChart({ devices }: { devices: Device[] }) {
+function HistoryChart({ devices, expanded = false }: { devices: Device[]; expanded?: boolean }) {
   const chartRoot = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -275,21 +275,26 @@ function HistoryChart({ devices }: { devices: Device[] }) {
         animationDuration: 420,
         color: comparisonColors,
         legend: {
-          top: 2,
+          top: expanded ? 8 : 2,
           left: 0,
-          itemWidth: 18,
-          itemHeight: 8,
-          textStyle: { color: styles.getPropertyValue("--ink-soft").trim(), fontSize: 10 },
+          itemWidth: expanded ? 28 : 18,
+          itemHeight: expanded ? 12 : 8,
+          textStyle: { color: styles.getPropertyValue("--ink-soft").trim(), fontSize: expanded ? 13 : 10 },
           data: devices.map((device) => device.id),
         },
-        grid: { left: 43, right: 12, top: devices.length > 1 ? 48 : 36, bottom: 30 },
+        grid: {
+          left: expanded ? 66 : 43,
+          right: expanded ? 30 : 12,
+          top: devices.length > 1 ? (expanded ? 66 : 48) : (expanded ? 52 : 36),
+          bottom: expanded ? 48 : 30,
+        },
         tooltip: { trigger: "axis", valueFormatter: (value: unknown) => `${value} L` },
         xAxis: {
           type: "category",
           boundaryGap: false,
           data: ["7/18", "7/19", "7/20", "7/21", "7/22", "7/23", "7/24"],
           axisLine: { lineStyle: { color: styles.getPropertyValue("--line").trim() } },
-          axisLabel: { color: styles.getPropertyValue("--muted").trim(), fontSize: 11 },
+          axisLabel: { color: styles.getPropertyValue("--muted").trim(), fontSize: expanded ? 13 : 11 },
           axisTick: { show: false },
         },
         yAxis: {
@@ -297,7 +302,7 @@ function HistoryChart({ devices }: { devices: Device[] }) {
           min: 0,
           max: 80,
           splitNumber: 4,
-          axisLabel: { color: styles.getPropertyValue("--muted").trim(), formatter: "{value} L", fontSize: 11 },
+          axisLabel: { color: styles.getPropertyValue("--muted").trim(), formatter: "{value} L", fontSize: expanded ? 13 : 11 },
           splitLine: { lineStyle: { color: styles.getPropertyValue("--line").trim() } },
         },
         series: devices.map((device, index) => ({
@@ -305,9 +310,9 @@ function HistoryChart({ devices }: { devices: Device[] }) {
           type: "line",
           smooth: 0.32,
           symbol: device.direction === "up" ? "circle" : "diamond",
-          symbolSize: 8,
+          symbolSize: expanded ? 11 : 8,
           data: device.history,
-          lineStyle: { width: 3, type: device.direction === "up" ? "solid" : "dashed" },
+          lineStyle: { width: expanded ? 4 : 3, type: device.direction === "up" ? "solid" : "dashed" },
           areaStyle: devices.length === 1 ? { opacity: 0.1 } : undefined,
           markLine: index === 0 ? {
             silent: true,
@@ -332,18 +337,21 @@ function HistoryChart({ devices }: { devices: Device[] }) {
       disposed = true;
       chart?.dispose();
     };
-  }, [devices]);
+  }, [devices, expanded]);
 
-  return <div className="history-chart" ref={chartRoot} role="img" aria-label={`${devices.map((device) => device.id).join("、")} 最近七次油量比較折線圖`} />;
+  return <div className={`history-chart ${expanded ? "expanded" : ""}`} ref={chartRoot} role="img" aria-label={`${devices.map((device) => device.id).join("、")} 最近七次油量比較折線圖`} />;
 }
 
 export default function Home() {
   const topologyRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
+  const expandChartButtonRef = useRef<HTMLButtonElement>(null);
+  const closeChartButtonRef = useRef<HTMLButtonElement>(null);
   const [mapSize, setMapSize] = useState({ width: 1000, height: 680 });
   const [selectedSegmentId, setSelectedSegmentId] = useState("Y10-Y11");
   const [selectedDeviceId, setSelectedDeviceId] = useState("LB4");
   const [comparedDeviceIds, setComparedDeviceIds] = useState<string[]>(["LB4"]);
+  const [isChartExpanded, setIsChartExpanded] = useState(false);
 
   useEffect(() => {
     const element = topologyRef.current;
@@ -354,6 +362,28 @@ export default function Home() {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!isChartExpanded) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeChartButtonRef.current?.focus();
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsChartExpanded(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isChartExpanded]);
+
+  const closeExpandedChart = () => {
+    setIsChartExpanded(false);
+    window.requestAnimationFrame(() => expandChartButtonRef.current?.focus());
+  };
 
   const layout = useMemo(() => calculateRouteLayout(mapSize.width, mapSize.height), [mapSize]);
   const selectedSegment = useMemo(
@@ -701,7 +731,20 @@ export default function Home() {
                     </strong>
                   ))}</div>
                 </div>
-                <div className="chart-heading"><strong>{comparedDevices.length > 1 ? `${comparedDevices.length} 台設備趨勢比較` : `${selectedDevice.id} 最近七次油量趨勢`}</strong><span>單位：L</span></div>
+                <div className="chart-heading">
+                  <strong>{comparedDevices.length > 1 ? `${comparedDevices.length} 台設備趨勢比較` : `${selectedDevice.id} 最近七次油量趨勢`}</strong>
+                  <div className="chart-heading-actions">
+                    <span>單位：L</span>
+                    <button
+                      type="button"
+                      className="expand-chart-button"
+                      ref={expandChartButtonRef}
+                      onClick={() => setIsChartExpanded(true)}
+                      aria-haspopup="dialog"
+                      aria-label="放大油量趨勢圖"
+                    ><i aria-hidden="true">⛶</i>放大</button>
+                  </div>
+                </div>
                 <HistoryChart devices={comparedDevices} />
                 <div className={`detail-note ${selectedDevice.status}`}>
                   <strong>維修提示</strong>
@@ -714,6 +757,49 @@ export default function Home() {
             )}
           </aside>
         </section>
+
+        {isChartExpanded && selectedDevice ? (
+          <div
+            className="chart-modal-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeExpandedChart();
+            }}
+          >
+            <section
+              className="chart-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="expanded-chart-title"
+            >
+              <header className="chart-modal-header">
+                <div>
+                  <span className="panel-kicker">{selectedSegment.location}</span>
+                  <h3 id="expanded-chart-title">
+                    {comparedDevices.length > 1 ? `${comparedDevices.length} 台設備趨勢比較` : `${selectedDevice.id} 最近七次油量趨勢`}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  className="chart-modal-close"
+                  ref={closeChartButtonRef}
+                  onClick={closeExpandedChart}
+                  aria-label="關閉放大圖表"
+                >×</button>
+              </header>
+              <div className="chart-modal-devices" aria-label="目前顯示設備">
+                {comparedDevices.map((device, index) => (
+                  <span key={device.id} style={{ "--series-color": comparisonColors[index % comparisonColors.length] } as CSSProperties}>
+                    <i></i><strong>{device.id}</strong>{device.value} L
+                  </span>
+                ))}
+                <small>單位：L</small>
+              </div>
+              <div className="chart-modal-canvas">
+                <HistoryChart devices={comparedDevices} expanded />
+              </div>
+            </section>
+          </div>
+        ) : null}
 
         <section className="panel alerts-panel">
           <div className="panel-heading">
