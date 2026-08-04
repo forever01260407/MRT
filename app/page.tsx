@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 
 type RailStatus = "normal" | "warning" | "critical" | "unknown";
 type Direction = "up" | "down";
-type LabelSide = "right" | "bottom" | "corner";
+type LabelSide = "right" | "left" | "top" | "bottom" | "upper-left" | "upper-right" | "lower-left" | "lower-right" | "corner";
 
 type Station = {
   id: string;
@@ -152,6 +152,22 @@ const statusPriority: Record<RailStatus, number> = {
 
 const routeStations = [...stations].reverse();
 const routeSegments = [...segments].reverse();
+const stationLabelSides: Record<string, LabelSide> = {
+  Y19: "right",
+  Y18: "right",
+  Y17: "upper-left",
+  Y16: "lower-left",
+  Y15: "upper-right",
+  Y14: "lower-left",
+  Y13: "upper-right",
+  Y12: "lower-left",
+  Y11: "upper-left",
+  Y10: "lower-right",
+  Y9: "top",
+  Y8: "bottom",
+  Y7: "top",
+  Y6: "bottom",
+};
 
 function devicesByDirection(segment: Segment, direction: Direction) {
   return segment.devices.filter((device) => device.direction === direction);
@@ -194,64 +210,65 @@ function formatChange(change: number) {
 function calculateRouteLayout(width: number, height: number): RouteLayout {
   const safeWidth = Math.max(width, 760);
   const safeHeight = Math.max(height, 560);
-  const padding = { left: 118, right: 138, top: 74, bottom: 112 };
+  const padding = { left: 124, right: 146, top: 72, bottom: 116 };
   const verticalAvailable = Math.max(300, safeHeight - padding.top - padding.bottom);
   const horizontalAvailable = Math.max(420, safeWidth - padding.left - padding.right);
   const weights = routeSegments.map(segmentWeight);
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
-
-  let bestBendIndex = 5;
+  const verticalSegmentCount = 2;
+  const diagonalEndIndex = 9;
+  const verticalWeight = weights.slice(0, verticalSegmentCount).reduce((sum, weight) => sum + weight, 0);
+  const diagonalWeight = weights.slice(verticalSegmentCount, diagonalEndIndex).reduce((sum, weight) => sum + weight, 0);
+  const horizontalWeight = weights.slice(diagonalEndIndex).reduce((sum, weight) => sum + weight, 0);
+  let bestAngle = 34;
   let bestUnit = 0;
-  let cumulativeWeight = 0;
 
-  for (let index = 1; index < routeSegments.length - 1; index += 1) {
-    cumulativeWeight += weights[index - 1];
-    const remainingWeight = totalWeight - cumulativeWeight;
+  for (let angle = 24; angle <= 48; angle += 0.5) {
+    const radians = angle * Math.PI / 180;
+    const widthWeight = diagonalWeight * Math.cos(radians) + horizontalWeight;
+    const heightWeight = verticalWeight + diagonalWeight * Math.sin(radians);
     const candidateUnit = Math.min(
-      verticalAvailable / cumulativeWeight,
-      horizontalAvailable / remainingWeight,
+      horizontalAvailable / widthWeight,
+      verticalAvailable / heightWeight,
     );
     if (candidateUnit > bestUnit) {
       bestUnit = candidateUnit;
-      bestBendIndex = index;
+      bestAngle = angle;
     }
   }
 
-  const verticalWeight = weights.slice(0, bestBendIndex).reduce((sum, weight) => sum + weight, 0);
-  const horizontalWeight = totalWeight - verticalWeight;
-  const verticalLength = verticalWeight * bestUnit;
-  const horizontalLength = horizontalWeight * bestUnit;
-  const startX = padding.left + Math.max(0, (horizontalAvailable - horizontalLength) / 2);
-  const startY = padding.top + Math.max(0, (verticalAvailable - verticalLength) / 2);
+  const diagonalRadians = bestAngle * Math.PI / 180;
+  const routeWidth = (diagonalWeight * Math.cos(diagonalRadians) + horizontalWeight) * bestUnit;
+  const routeHeight = (verticalWeight + diagonalWeight * Math.sin(diagonalRadians)) * bestUnit;
+  const startX = padding.left + Math.max(0, (horizontalAvailable - routeWidth) / 2);
+  const startY = padding.top + Math.max(0, (verticalAvailable - routeHeight) / 2);
 
   const stationPoints: Record<string, Point> = {};
   const segmentGeometry: Record<string, SegmentGeometry> = {};
   let x = startX;
   let y = startY;
 
-  stationPoints[routeStations[0].id] = { x, y, labelSide: "right" };
+  stationPoints[routeStations[0].id] = { x, y, labelSide: stationLabelSides[routeStations[0].id] };
 
   routeSegments.forEach((segment, index) => {
     const length = weights[index] * bestUnit;
-    const isVertical = index < bestBendIndex;
-    const angle = isVertical ? 90 : 0;
+    const isVertical = index < verticalSegmentCount;
+    const isDiagonal = index >= verticalSegmentCount && index < diagonalEndIndex;
+    const angle = isVertical ? 90 : isDiagonal ? bestAngle : 0;
+    const radians = angle * Math.PI / 180;
     segmentGeometry[segment.id] = { x, y, length, angle };
 
-    if (isVertical) y += length;
-    else x += length;
+    x += length * Math.cos(radians);
+    y += length * Math.sin(radians);
 
     const nextStation = routeStations[index + 1];
-    stationPoints[nextStation.id] = {
-      x,
-      y,
-      labelSide: index + 1 === bestBendIndex ? "corner" : isVertical ? "right" : "bottom",
-    };
+    stationPoints[nextStation.id] = { x, y, labelSide: stationLabelSides[nextStation.id] };
   });
 
   return {
     stationPoints,
     segmentGeometry,
-    bendStation: routeStations[bestBendIndex].id,
+    bendStation: `${routeStations[verticalSegmentCount].id}、${routeStations[diagonalEndIndex].id}`,
     unit: bestUnit,
     totalWeight,
   };
@@ -344,13 +361,21 @@ function HistoryChart({ devices, expanded = false }: { devices: Device[]; expand
 
 export default function Home() {
   const topologyRef = useRef<HTMLDivElement>(null);
+  const expandedTopologyRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
+  const expandMapButtonRef = useRef<HTMLButtonElement>(null);
+  const closeMapButtonRef = useRef<HTMLButtonElement>(null);
   const expandChartButtonRef = useRef<HTMLButtonElement>(null);
   const closeChartButtonRef = useRef<HTMLButtonElement>(null);
+  const mapDragRef = useRef({ pointerId: -1, startX: 0, startY: 0, originX: 0, originY: 0, moved: false });
   const [mapSize, setMapSize] = useState({ width: 1000, height: 680 });
+  const [expandedMapSize, setExpandedMapSize] = useState({ width: 1400, height: 760 });
   const [selectedSegmentId, setSelectedSegmentId] = useState("Y10-Y11");
   const [selectedDeviceId, setSelectedDeviceId] = useState("LB4");
   const [comparedDeviceIds, setComparedDeviceIds] = useState<string[]>(["LB4"]);
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
+  const [isMapDragging, setIsMapDragging] = useState(false);
+  const [mapViewport, setMapViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [isChartExpanded, setIsChartExpanded] = useState(false);
 
   useEffect(() => {
@@ -362,6 +387,34 @@ export default function Home() {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!isMapExpanded) return;
+    const element = expandedTopologyRef.current;
+    if (!element) return;
+    const updateSize = () => setExpandedMapSize({ width: element.clientWidth, height: element.clientHeight });
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [isMapExpanded]);
+
+  useEffect(() => {
+    if (!isMapExpanded) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeMapButtonRef.current?.focus();
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsMapExpanded(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isMapExpanded]);
 
   useEffect(() => {
     if (!isChartExpanded) return;
@@ -385,7 +438,86 @@ export default function Home() {
     window.requestAnimationFrame(() => expandChartButtonRef.current?.focus());
   };
 
+  const openExpandedMap = () => {
+    setMapViewport({ x: 0, y: 0, scale: 1 });
+    setIsMapExpanded(true);
+  };
+
+  const closeExpandedMap = () => {
+    setIsMapExpanded(false);
+    setIsMapDragging(false);
+    window.requestAnimationFrame(() => expandMapButtonRef.current?.focus());
+  };
+
+  const clampMapScale = (scale: number) => Math.min(3, Math.max(0.6, scale));
+
+  const zoomExpandedMap = (change: number) => {
+    setMapViewport((current) => {
+      const nextScale = clampMapScale(current.scale + change);
+      const ratio = nextScale / current.scale;
+      const centerX = expandedMapSize.width / 2;
+      const centerY = expandedMapSize.height / 2;
+      return {
+        scale: nextScale,
+        x: centerX - (centerX - current.x) * ratio,
+        y: centerY - (centerY - current.y) * ratio,
+      };
+    });
+  };
+
+  const handleExpandedMapWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const pointerX = event.clientX - rect.left;
+    const pointerY = event.clientY - rect.top;
+    setMapViewport((current) => {
+      const nextScale = clampMapScale(current.scale * (event.deltaY < 0 ? 1.12 : 0.89));
+      const ratio = nextScale / current.scale;
+      return {
+        scale: nextScale,
+        x: pointerX - (pointerX - current.x) * ratio,
+        y: pointerY - (pointerY - current.y) * ratio,
+      };
+    });
+  };
+
+  const handleExpandedMapPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    mapDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: mapViewport.x,
+      originY: mapViewport.y,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsMapDragging(true);
+  };
+
+  const handleExpandedMapPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = mapDragRef.current;
+    if (drag.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (Math.abs(deltaX) + Math.abs(deltaY) > 4) drag.moved = true;
+    setMapViewport((current) => ({ ...current, x: drag.originX + deltaX, y: drag.originY + deltaY }));
+  };
+
+  const handleExpandedMapPointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (mapDragRef.current.pointerId !== event.pointerId) return;
+    mapDragRef.current.pointerId = -1;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setIsMapDragging(false);
+  };
+
   const layout = useMemo(() => calculateRouteLayout(mapSize.width, mapSize.height), [mapSize]);
+  const expandedLayout = useMemo(
+    () => calculateRouteLayout(expandedMapSize.width, expandedMapSize.height),
+    [expandedMapSize],
+  );
   const selectedSegment = useMemo(
     () => segments.find((segment) => segment.id === selectedSegmentId) ?? segments[4],
     [selectedSegmentId],
@@ -478,7 +610,7 @@ export default function Home() {
       <button
         type="button"
         key={device.id}
-        className={`device-track ${device.status} ${selectedDeviceId === device.id ? "selected" : ""} ${comparedDeviceIds.includes(device.id) ? "compared" : ""}`}
+        className={`device-track device-${device.id.toLowerCase()} ${device.status} ${selectedDeviceId === device.id ? "selected" : ""} ${comparedDeviceIds.includes(device.id) ? "compared" : ""}`}
         onClick={(event) => {
           event.stopPropagation();
           selectDevice(segment, device);
@@ -526,6 +658,65 @@ export default function Home() {
     );
   });
 
+  const renderTopology = (activeLayout: RouteLayout) => (
+    <>
+      {segments.map((segment) => {
+        const geometry = activeLayout.segmentGeometry[segment.id];
+        if (!geometry) return null;
+        const active = selectedSegmentId === segment.id;
+        return (
+          <div
+            className={`map-segment-group ${active ? "selected" : ""}`}
+            key={segment.id}
+            style={{
+              left: `${geometry.x.toFixed(2)}px`,
+              top: `${geometry.y.toFixed(2)}px`,
+              width: `${geometry.length.toFixed(2)}px`,
+              transform: `translateY(-50%) rotate(${geometry.angle}deg)`,
+            }}
+          >
+            <button
+              type="button"
+              className="interval-hit"
+              onClick={() => selectSegment(segment)}
+              aria-pressed={active}
+              aria-label={`選取 ${stations[segment.from].name}至${stations[segment.to].name}區間設備`}
+            ></button>
+            <div className="track-lane lane-up">
+              {renderDeviceLane(segment, "up", geometry.angle)}
+            </div>
+            <div className="track-lane lane-down">
+              {renderDeviceLane(segment, "down", geometry.angle)}
+            </div>
+          </div>
+        );
+      })}
+
+      {stations.map((station, index) => {
+        const point = activeLayout.stationPoints[station.id];
+        if (!point) return null;
+        const active = selectedSegment.from === index || selectedSegment.to === index;
+        const state = stationStatus(index);
+        return (
+          <div
+            className={`map-station station-${station.id.toLowerCase()} label-${point.labelSide} ${active ? "selected" : ""}`}
+            key={station.id}
+            style={{ left: `${point.x.toFixed(2)}px`, top: `${point.y.toFixed(2)}px` }}
+            title={`${station.id} ${station.name}站`}
+          >
+            <span className="station-node">{station.id}</span>
+            <span className="station-label"><strong>{station.name}</strong><small>{station.id}</small></span>
+            <i className={`station-state ${state}`}></i>
+          </div>
+        );
+      })}
+
+      <div className="depot-marker">
+        <span>南機廠</span><small>31 個磨耗量測點</small>
+      </div>
+    </>
+  );
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -537,7 +728,9 @@ export default function Home() {
           </div>
         </div>
         <nav className="topnav" aria-label="主要功能">
-          <button type="button" className="nav-item active">全線總覽</button>
+          <a href="/" className="nav-item active" aria-current="page">潤滑設備總覽</a>
+          <a href="/wear" className="nav-item">正面軌道總覽</a>
+          <a href="/side-wear" className="nav-item">側面軌道總覽</a>
         </nav>
         <div className="sync-state"><span className="pulse-dot"></span>UI 草圖 · 模擬資料</div>
       </header>
@@ -562,77 +755,30 @@ export default function Home() {
           <article className="panel route-panel">
             <div className="panel-heading">
               <div>
-                <span className="panel-kicker">設備權重 L 型拓撲</span>
+                <span className="panel-kicker">設備權重 · 實際路線走向</span>
                 <h3>Y19 新北產業園區－Y6 大坪林</h3>
               </div>
-              <div className="legend" aria-label="軌道狀態圖例">
-                <span><i className="legend-line normal"></i>正常</span>
-                <span><i className="legend-line warning"></i>注意</span>
-                <span><i className="legend-line critical"></i>需處理</span>
-                <span><i className="legend-line unknown"></i>尚無資料</span>
+              <div className="map-heading-actions">
+                <div className="legend" aria-label="軌道狀態圖例">
+                  <span><i className="legend-line normal"></i>正常</span>
+                  <span><i className="legend-line warning"></i>注意</span>
+                  <span><i className="legend-line critical"></i>需處理</span>
+                  <span><i className="legend-line unknown"></i>尚無資料</span>
+                </div>
+                <button
+                  type="button"
+                  className="expand-map-button"
+                  ref={expandMapButtonRef}
+                  onClick={openExpandedMap}
+                  aria-haspopup="dialog"
+                  aria-label="放大環狀線地圖"
+                ><i aria-hidden="true">⛶</i>放大地圖</button>
               </div>
             </div>
 
             <div className="topology-stage" ref={topologyRef} role="group" aria-label="環狀線 Y19 至 Y6 設備權重 L 型軌道圖">
               <div className="map-orientation"><span>北</span><i></i></div>
-              <span className="map-zone zone-north">新莊</span>
-              <span className="map-zone zone-center">板橋</span>
-              <span className="map-zone zone-south">中和 · 新店</span>
-
-              {segments.map((segment) => {
-                const geometry = layout.segmentGeometry[segment.id];
-                if (!geometry) return null;
-                const active = selectedSegmentId === segment.id;
-                return (
-                  <div
-                    className={`map-segment-group ${active ? "selected" : ""}`}
-                    key={segment.id}
-                    style={{
-                      left: `${geometry.x.toFixed(2)}px`,
-                      top: `${geometry.y.toFixed(2)}px`,
-                      width: `${geometry.length.toFixed(2)}px`,
-                      transform: `translateY(-50%) rotate(${geometry.angle}deg)`,
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="interval-hit"
-                      onClick={() => selectSegment(segment)}
-                      aria-pressed={active}
-                      aria-label={`查看 ${stations[segment.from].name}到${stations[segment.to].name}全部設備`}
-                    ></button>
-                    <div className="track-lane lane-up">
-                      {renderDeviceLane(segment, "up", geometry.angle)}
-                    </div>
-                    <div className="track-lane lane-down">
-                      {renderDeviceLane(segment, "down", geometry.angle)}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {stations.map((station, index) => {
-                const point = layout.stationPoints[station.id];
-                if (!point) return null;
-                const active = selectedSegment.from === index || selectedSegment.to === index;
-                const state = stationStatus(index);
-                return (
-                  <div
-                    className={`map-station label-${point.labelSide} ${active ? "selected" : ""}`}
-                    key={station.id}
-                    style={{ left: `${point.x.toFixed(2)}px`, top: `${point.y.toFixed(2)}px` }}
-                    title={`${station.id} ${station.name}站`}
-                  >
-                    <span className="station-node">{station.id}</span>
-                    <span className="station-label"><strong>{station.name}</strong><small>{station.id}</small></span>
-                    <i className={`station-state ${state}`}></i>
-                  </div>
-                );
-              })}
-
-              <div className="depot-marker">
-                <span>南機廠</span><small>31 個磨耗量測點</small>
-              </div>
+              {renderTopology(layout)}
             </div>
 
             <div className="mobile-route-list" aria-label="環狀線行動版設備列表">
@@ -666,7 +812,7 @@ export default function Home() {
             <div className="route-footnote">
               <span><i className="up-rail"></i>MOK 上行軌</span>
               <span><i className="down-rail"></i>LB 下行軌</span>
-              <p>W = 1 + 0.75X｜總權重 {layout.totalWeight.toFixed(1)}｜1 單位約 {layout.unit.toFixed(0)}px｜轉彎站 {layout.bendStation}</p>
+              <p>W = 1 + 0.75X｜總權重 {layout.totalWeight.toFixed(1)}｜1 單位約 {layout.unit.toFixed(0)}px｜轉折站 {layout.bendStation}</p>
             </div>
           </article>
 
@@ -753,6 +899,78 @@ export default function Home() {
             )}
           </aside>
         </section>
+
+        {isMapExpanded ? (
+          <div
+            className="map-modal-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeExpandedMap();
+            }}
+          >
+            <section
+              className="map-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="expanded-map-title"
+            >
+              <header className="map-modal-header">
+                <div>
+                  <span className="panel-kicker">INTERACTIVE ROUTE MAP</span>
+                  <h3 id="expanded-map-title">環狀線全線設備地圖</h3>
+                  <p>拖曳移動地圖，使用滑鼠滾輪或右側按鈕縮放；線段與設備仍可直接點選。</p>
+                </div>
+                <button
+                  type="button"
+                  className="chart-modal-close"
+                  ref={closeMapButtonRef}
+                  onClick={closeExpandedMap}
+                  aria-label="關閉放大地圖"
+                >×</button>
+              </header>
+
+              <div className="map-modal-viewport-shell">
+                <div
+                  className={`map-modal-viewport ${isMapDragging ? "dragging" : ""}`}
+                  ref={expandedTopologyRef}
+                  onWheel={handleExpandedMapWheel}
+                  onPointerDown={handleExpandedMapPointerDown}
+                  onPointerMove={handleExpandedMapPointerMove}
+                  onPointerUp={handleExpandedMapPointerEnd}
+                  onPointerCancel={handleExpandedMapPointerEnd}
+                  onClickCapture={(event) => {
+                    if (!mapDragRef.current.moved) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    mapDragRef.current.moved = false;
+                  }}
+                  role="application"
+                  aria-label="可拖曳與縮放的環狀線設備地圖"
+                >
+                  <div
+                    className="map-pan-layer"
+                    style={{
+                      transform: `translate(${mapViewport.x}px, ${mapViewport.y}px) scale(${mapViewport.scale})`,
+                    }}
+                  >
+                    {renderTopology(expandedLayout)}
+                  </div>
+                  <div className="map-orientation expanded-orientation"><span>北</span><i></i></div>
+                  <div className="map-zoom-controls" aria-label="地圖縮放控制">
+                    <button type="button" onClick={() => zoomExpandedMap(0.2)} aria-label="放大地圖">＋</button>
+                    <output aria-live="polite">{Math.round(mapViewport.scale * 100)}%</output>
+                    <button type="button" onClick={() => zoomExpandedMap(-0.2)} aria-label="縮小地圖">－</button>
+                    <button
+                      type="button"
+                      className="reset-map-view"
+                      onClick={() => setMapViewport({ x: 0, y: 0, scale: 1 })}
+                    >重設</button>
+                  </div>
+                  <div className="map-drag-hint"><span aria-hidden="true">✥</span>拖曳移動 · 滾輪縮放</div>
+                </div>
+              </div>
+            </section>
+          </div>
+        ) : null}
 
         {isChartExpanded && selectedDevice ? (
           <div
