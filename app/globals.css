@@ -326,6 +326,7 @@ button:focus-visible {
   font-weight: 900;
   box-shadow: 0 0 0 4px #fff, 0 4px 12px rgba(23, 33, 58, .18);
 }
+.station-node em { font-style: normal; }
 
 .map-station.selected .station-node { box-shadow: 0 0 0 5px rgba(98, 85, 223, .25), 0 5px 14px rgba(23, 33, 58, .2); }
 .station-label { display: grid; gap: 2px; position: absolute; text-align: left; white-space: nowrap; }
@@ -930,6 +931,56 @@ button:focus-visible {
   .chart-heading-actions { flex-direction: column; align-items: flex-end; }
   .chart-modal-devices > span { padding: 6px 8px; font-size: 10px; }
 }
+
+/* Side-wear uses compact sleeper-like station markers. Their long edge is
+   rotated across the local rail tangent while the station code stays upright. */
+.side-wear-page .map-station {
+  width: 40px;
+  height: 40px;
+}
+.side-wear-page .station-node {
+  width: 34px;
+  height: 18px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-width: 3px;
+  border-radius: 5px;
+  font-size: 8px;
+  box-shadow: 0 0 0 2px #fff, 0 3px 8px rgba(23, 33, 58, .17);
+  transform: translate(-50%, -50%) rotate(var(--station-cross-angle, 90deg));
+  transform-origin: center;
+}
+.side-wear-page .station-node em {
+  display: block;
+  transform: rotate(var(--station-text-angle, -90deg));
+}
+.side-wear-page .map-station.selected .station-node {
+  box-shadow: 0 0 0 4px rgba(98, 85, 223, .28), 0 4px 10px rgba(23, 33, 58, .2);
+}
+.side-wear-page .station-state {
+  width: 8px;
+  height: 8px;
+  right: 0;
+  bottom: 4px;
+  border-width: 2px;
+}
+.side-wear-page .station-label { gap: 1px; }
+.side-wear-page .station-label strong { font-size: 11px; }
+.side-wear-page .station-label small { font-size: 8px; }
+.side-wear-page .label-right .station-label { left: 43px; top: 5px; }
+.side-wear-page .label-left .station-label { right: 43px; top: 5px; }
+.side-wear-page .label-top .station-label { bottom: 43px; }
+.side-wear-page .label-bottom .station-label { top: 43px; }
+.side-wear-page .label-upper-left .station-label { right: 40px; bottom: 36px; }
+.side-wear-page .label-upper-right .station-label { left: 40px; bottom: 36px; }
+.side-wear-page .label-lower-left .station-label { right: 40px; top: 38px; }
+.side-wear-page .label-lower-right .station-label { left: 40px; top: 38px; }
+.side-wear-page .label-corner .station-label { right: 43px; top: 5px; }
+.side-wear-page .station-y11.label-upper-left .station-label { left: auto; right: 40px; bottom: 52px; text-align: right; }
+.side-wear-page .station-y14.label-lower-left .station-label { top: 46px; }
+.side-wear-page .station-y15.label-upper-right .station-label { left: 49px; }
+.side-wear-page .station-y16.label-lower-left .station-label { right: 48px; }
 
 @media (prefers-reduced-motion: reduce) {
   .device-track.selected::before { animation: none; }

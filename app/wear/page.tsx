@@ -490,12 +490,25 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
         );
       })}
 
-      {wearStations.map((station) => {
+      {wearStations.map((station, stationIndex) => {
         const point = activeLayout.stationPoints[station.id];
+        const previousPoint = stationIndex > 0
+          ? activeLayout.stationPoints[wearStations[stationIndex - 1].id]
+          : point;
+        const nextPoint = stationIndex < wearStations.length - 1
+          ? activeLayout.stationPoints[wearStations[stationIndex + 1].id]
+          : point;
+        const railAngle = Math.atan2(nextPoint.y - previousPoint.y, nextPoint.x - previousPoint.x) * 180 / Math.PI;
+        const stationStyle = {
+          left: `${point.x.toFixed(2)}px`,
+          top: `${point.y.toFixed(2)}px`,
+          "--station-cross-angle": `${railAngle + 90}deg`,
+          "--station-text-angle": `${-(railAngle + 90)}deg`,
+        } as CSSProperties;
         const active = selectedPoint.from.id === station.id || selectedPoint.to.id === station.id;
         return (
-          <div className={`map-station station-${station.id.toLowerCase()} label-${point.labelSide} ${active ? "selected" : ""}`} key={station.id} style={{ left: `${point.x.toFixed(2)}px`, top: `${point.y.toFixed(2)}px` }}>
-            <span className="station-node">{station.id}</span>
+          <div className={`map-station station-${station.id.toLowerCase()} label-${point.labelSide} ${active ? "selected" : ""}`} key={station.id} style={stationStyle}>
+            <span className="station-node"><em>{station.id}</em></span>
             <span className="station-label"><strong>{station.name}</strong><small>{station.id}</small></span>
             <i className={`station-state ${stationStatus(station)}`}></i>
           </div>
@@ -530,7 +543,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
   };
 
   return (
-    <main className="app-shell wear-page">
+    <main className={`app-shell wear-page ${mode === "side" ? "side-wear-page" : "tread-wear-page"}`}>
       <header className="topbar">
         <div className="brand-block">
           <div className="brand-mark wear-brand-mark" aria-hidden="true"><span></span><span></span></div>
