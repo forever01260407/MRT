@@ -88,6 +88,52 @@ button:focus-visible {
 .updated-at { padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: var(--surface); font-size: 12px; white-space: nowrap; }
 .updated-at strong { color: var(--ink); }
 
+.excel-import-panel {
+  margin-bottom: 16px;
+  padding: 16px 18px 13px;
+  display: grid;
+  grid-template-columns: auto minmax(260px, 1fr) auto;
+  align-items: center;
+  gap: 12px 16px;
+  border: 1px solid #d8d3ff;
+  border-radius: 15px;
+  background: linear-gradient(135deg, #fff 48%, #f4f2ff);
+  box-shadow: 0 4px 16px rgba(36, 49, 75, .045);
+}
+.excel-import-panel.success { border-color: #aee6d2; background: linear-gradient(135deg, #fff 48%, var(--success-soft)); }
+.excel-import-panel.error { border-color: #ffc4cf; background: linear-gradient(135deg, #fff 48%, var(--danger-soft)); }
+.excel-import-icon { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 13px; color: #fff; background: #168b5b; box-shadow: 0 6px 14px rgba(22, 139, 91, .2); }
+.excel-import-icon span { font-size: 13px; font-weight: 950; letter-spacing: .05em; }
+.excel-import-copy h3 { margin: 3px 0 3px; font-size: 17px; }
+.excel-import-copy p { margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.55; }
+.excel-import-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.excel-template-link, .excel-import-button, .excel-reset-button {
+  min-height: 38px;
+  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 900;
+  text-decoration: none;
+  cursor: pointer;
+}
+.excel-template-link { border: 1px solid #bdb6f7; color: var(--violet); background: #fff; }
+.excel-template-link:hover { border-color: var(--violet); background: var(--violet-soft); }
+.excel-import-button { border: 1px solid var(--violet); color: #fff; background: var(--violet); box-shadow: 0 5px 12px rgba(98, 85, 223, .18); }
+.excel-import-button:hover { background: #5145c7; }
+.excel-import-button:disabled { opacity: .65; cursor: wait; }
+.excel-reset-button { border: 1px solid var(--line); color: var(--ink-soft); background: #fff; }
+.excel-reset-button:hover { border-color: var(--ink-soft); }
+.visually-hidden-file { width: 1px; height: 1px; position: absolute; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.excel-import-result { grid-column: 2 / -1; padding-top: 10px; display: flex; align-items: flex-start; gap: 9px; border-top: 1px solid rgba(130, 144, 165, .2); color: var(--ink-soft); font-size: 11px; }
+.excel-import-result strong { flex: 0 0 auto; color: var(--ink); }
+.excel-import-panel.success .excel-import-result strong { color: #087b59; }
+.excel-import-panel.error .excel-import-result strong { color: #b32643; }
+.excel-import-result span { line-height: 1.55; }
+.excel-import-result ul { margin: 0; padding-left: 18px; color: #b32643; line-height: 1.55; }
+
 .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
 .summary-card {
   min-height: 92px;
@@ -688,6 +734,9 @@ button:focus-visible {
   .topnav { width: 100%; justify-self: start; overflow-x: auto; }
   .sync-state { justify-self: start; }
   .page-heading { align-items: flex-start; flex-direction: column; }
+  .excel-import-panel { grid-template-columns: auto 1fr; align-items: start; }
+  .excel-import-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .excel-import-result { grid-column: 1 / -1; }
   .summary-grid { grid-template-columns: repeat(2, 1fr); }
   .panel-heading { flex-direction: column; }
   .map-heading-actions { width: 100%; justify-items: start; }
@@ -922,6 +971,11 @@ button:focus-visible {
   .brand-mark { width: 42px; height: 42px; }
   .summary-grid { grid-template-columns: 1fr; }
   .summary-card { min-height: 82px; }
+  .excel-import-panel { grid-template-columns: 1fr; }
+  .excel-import-icon { width: 42px; height: 42px; }
+  .excel-import-copy, .excel-import-actions, .excel-import-result { grid-column: 1; }
+  .excel-import-actions > * { width: 100%; }
+  .excel-import-result { display: grid; }
   .route-panel, .detail-panel, .alerts-panel { padding: 16px 14px; border-radius: 14px; }
   .device-reading-grid { grid-template-columns: 1fr 1fr; }
   .device-reading-grid > :last-child { grid-column: 1 / -1; }

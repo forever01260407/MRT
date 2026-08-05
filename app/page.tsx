@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import type { ChangeEvent, CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import { LubricationImportError, readLubricationWorkbook } from "./lib/lubricationExcel";
+import type { LubricationRecord } from "./lib/lubricationExcel";
 
 type RailStatus = "normal" | "warning" | "critical" | "unknown";
 type Direction = "up" | "down";
@@ -19,6 +21,8 @@ type Device = {
   value: number;
   change: number;
   history: number[];
+  historyDates: string[];
+  latestRecord?: LubricationRecord;
 };
 
 type Segment = {
@@ -52,6 +56,16 @@ type RouteLayout = {
   totalWeight: number;
 };
 
+type ExcelImportState = {
+  status: "idle" | "loading" | "success" | "error";
+  message: string;
+  fileName?: string;
+  recordCount?: number;
+  deviceCount?: number;
+  latestMeasuredAt?: string;
+  errors?: string[];
+};
+
 const stations: Station[] = [
   { id: "Y6", name: "大坪林" },
   { id: "Y7", name: "十四張" },
@@ -69,6 +83,16 @@ const stations: Station[] = [
   { id: "Y19", name: "新北產業園區" },
 ];
 
+const demoHistoryDates = [
+  "2026-07-18T08:00:00",
+  "2026-07-19T08:00:00",
+  "2026-07-20T08:00:00",
+  "2026-07-21T08:00:00",
+  "2026-07-22T08:00:00",
+  "2026-07-23T08:00:00",
+  "2026-07-24T08:00:00",
+];
+
 function makeDevice(
   id: string,
   direction: Direction,
@@ -77,7 +101,7 @@ function makeDevice(
   change: number,
   history: number[],
 ): Device {
-  return { id, direction, status, value, change, history };
+  return { id, direction, status, value, change, history, historyDates: demoHistoryDates };
 }
 
 const segments: Segment[] = [
@@ -197,14 +221,60 @@ function segmentWeight(segment: Segment) {
   return 1 + 0.75 * segmentSlotCount(segment);
 }
 
-function stationStatus(stationIndex: number) {
-  const adjacent = segments.filter((segment) => segment.from === stationIndex || segment.to === stationIndex);
+function stationStatus(stationIndex: number, sourceSegments: Segment[] = segments) {
+  const adjacent = sourceSegments.filter((segment) => segment.from === stationIndex || segment.to === stationIndex);
   return worstStatus(adjacent.map(segmentStatus));
 }
 
 function formatChange(change: number) {
   if (change === 0) return "無變動";
   return `${change > 0 ? "+" : ""}${change} L`;
+}
+
+function oilLevelStatus(value: number): RailStatus {
+  if (value < 20) return "critical";
+  if (value < 30) return "warning";
+  return "normal";
+}
+
+function formatMeasurementTime(value: string) {
+  return value.replace("T", " ").slice(0, 16);
+}
+
+function formatChartDate(value: string) {
+  const compact = value.replace("T", " ");
+  return compact.slice(5, 10).replace("-", "/") + (compact.slice(11, 16) === "00:00" ? "" : ` ${compact.slice(11, 16)}`);
+}
+
+function applyImportedRecords(sourceSegments: Segment[], records: LubricationRecord[]) {
+  const recordsByDevice = new Map<string, LubricationRecord[]>();
+  records.forEach((record) => {
+    const deviceRecords = recordsByDevice.get(record.deviceId) ?? [];
+    deviceRecords.push(record);
+    recordsByDevice.set(record.deviceId, deviceRecords);
+  });
+
+  return sourceSegments.map((segment) => ({
+    ...segment,
+    devices: segment.devices.map((device) => {
+      const deviceRecords = recordsByDevice.get(device.id);
+      if (!deviceRecords?.length) return device;
+      const sortedRecords = [...deviceRecords].sort((a, b) => a.measuredAt.localeCompare(b.measuredAt));
+      const recentRecords = sortedRecords.slice(-7);
+      const latestRecord = sortedRecords[sortedRecords.length - 1];
+      const previousRecord = sortedRecords[sortedRecords.length - 2];
+      const change = previousRecord ? Number((latestRecord.oilLevel - previousRecord.oilLevel).toFixed(2)) : 0;
+      return {
+        ...device,
+        status: oilLevelStatus(latestRecord.oilLevel),
+        value: latestRecord.oilLevel,
+        change,
+        history: recentRecords.map((record) => record.oilLevel),
+        historyDates: recentRecords.map((record) => record.measuredAt),
+        latestRecord,
+      };
+    }),
+  }));
 }
 
 function calculateRouteLayout(width: number, height: number): RouteLayout {
@@ -282,6 +352,9 @@ function HistoryChart({ devices, expanded = false }: { devices: Device[]; expand
   useEffect(() => {
     let disposed = false;
     let chart: { dispose: () => void; resize: () => void } | undefined;
+    const axisDates = Array.from(new Set(devices.flatMap((device) => device.historyDates))).sort();
+    const highestValue = Math.max(80, ...devices.flatMap((device) => device.history));
+    const yAxisMaximum = highestValue <= 100 ? Math.ceil(highestValue / 20) * 20 : Math.ceil(highestValue / 100) * 100;
 
     void import("echarts").then((echarts) => {
       if (disposed || !chartRoot.current) return;
@@ -309,36 +382,40 @@ function HistoryChart({ devices, expanded = false }: { devices: Device[]; expand
         xAxis: {
           type: "category",
           boundaryGap: false,
-          data: ["7/18", "7/19", "7/20", "7/21", "7/22", "7/23", "7/24"],
+          data: axisDates,
           axisLine: { lineStyle: { color: styles.getPropertyValue("--line").trim() } },
-          axisLabel: { color: styles.getPropertyValue("--muted").trim(), fontSize: expanded ? 13 : 11 },
+          axisLabel: { color: styles.getPropertyValue("--muted").trim(), fontSize: expanded ? 13 : 11, formatter: (value: string) => formatChartDate(value) },
           axisTick: { show: false },
         },
         yAxis: {
           type: "value",
           min: 0,
-          max: 80,
+          max: yAxisMaximum,
           splitNumber: 4,
           axisLabel: { color: styles.getPropertyValue("--muted").trim(), formatter: "{value} L", fontSize: expanded ? 13 : 11 },
           splitLine: { lineStyle: { color: styles.getPropertyValue("--line").trim() } },
         },
-        series: devices.map((device, index) => ({
-          name: device.id,
-          type: "line",
-          smooth: 0.32,
-          symbol: device.direction === "up" ? "circle" : "diamond",
-          symbolSize: expanded ? 11 : 8,
-          data: device.history,
-          lineStyle: { width: expanded ? 4 : 3, type: device.direction === "up" ? "solid" : "dashed" },
-          areaStyle: devices.length === 1 ? { opacity: 0.1 } : undefined,
-          markLine: index === 0 ? {
-            silent: true,
-            symbol: "none",
-            label: { formatter: "警戒 20 L", color: styles.getPropertyValue("--danger").trim() },
-            lineStyle: { color: styles.getPropertyValue("--danger").trim(), type: "dashed" },
-            data: [{ yAxis: 20 }],
-          } : undefined,
-        })),
+        series: devices.map((device, index) => {
+          const historyByDate = new Map(device.historyDates.map((date, historyIndex) => [date, device.history[historyIndex]]));
+          return {
+            name: device.id,
+            type: "line",
+            connectNulls: false,
+            smooth: 0.32,
+            symbol: device.direction === "up" ? "circle" : "diamond",
+            symbolSize: expanded ? 11 : 8,
+            data: axisDates.map((date) => historyByDate.get(date) ?? null),
+            lineStyle: { width: expanded ? 4 : 3, type: device.direction === "up" ? "solid" : "dashed" },
+            areaStyle: devices.length === 1 ? { opacity: 0.1 } : undefined,
+            markLine: index === 0 ? {
+              silent: true,
+              symbol: "none",
+              label: { formatter: "警戒 20 L", color: styles.getPropertyValue("--danger").trim() },
+              lineStyle: { color: styles.getPropertyValue("--danger").trim(), type: "dashed" },
+              data: [{ yAxis: 20 }],
+            } : undefined,
+          };
+        }),
       });
 
       const resize = () => instance.resize();
@@ -363,6 +440,7 @@ export default function Home() {
   const topologyRef = useRef<HTMLDivElement>(null);
   const expandedTopologyRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
+  const excelInputRef = useRef<HTMLInputElement>(null);
   const expandMapButtonRef = useRef<HTMLButtonElement>(null);
   const closeMapButtonRef = useRef<HTMLButtonElement>(null);
   const expandChartButtonRef = useRef<HTMLButtonElement>(null);
@@ -377,6 +455,11 @@ export default function Home() {
   const [isMapDragging, setIsMapDragging] = useState(false);
   const [mapViewport, setMapViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [isChartExpanded, setIsChartExpanded] = useState(false);
+  const [activeSegments, setActiveSegments] = useState<Segment[]>(segments);
+  const [excelImport, setExcelImport] = useState<ExcelImportState>({
+    status: "idle",
+    message: "尚未匯入 Excel，目前顯示網站內建示範資料。",
+  });
 
   useEffect(() => {
     const element = topologyRef.current;
@@ -518,9 +601,10 @@ export default function Home() {
     () => calculateRouteLayout(expandedMapSize.width, expandedMapSize.height),
     [expandedMapSize],
   );
+  const activeRouteSegments = useMemo(() => [...activeSegments].reverse(), [activeSegments]);
   const selectedSegment = useMemo(
-    () => segments.find((segment) => segment.id === selectedSegmentId) ?? segments[4],
-    [selectedSegmentId],
+    () => activeSegments.find((segment) => segment.id === selectedSegmentId) ?? activeSegments[4],
+    [activeSegments, selectedSegmentId],
   );
   const selectedDevice = useMemo(
     () => selectedSegment.devices.find((device) => device.id === selectedDeviceId) ?? null,
@@ -536,15 +620,64 @@ export default function Home() {
   const upDevices = devicesByDirection(selectedSegment, "up");
   const downDevices = devicesByDirection(selectedSegment, "down");
 
-  const allDeviceRecords = useMemo(() => segments.flatMap((segment) => (
+  const allDeviceRecords = useMemo(() => activeSegments.flatMap((segment) => (
     segment.devices.map((device) => ({ device, segment }))
-  )), []);
+  )), [activeSegments]);
   const alerts = useMemo(() => allDeviceRecords
     .filter(({ device }) => device.status === "critical" || device.status === "warning")
     .sort((a, b) => statusPriority[b.device.status] - statusPriority[a.device.status] || a.device.value - b.device.value)
     .slice(0, 6), [allDeviceRecords]);
   const criticalCount = allDeviceRecords.filter(({ device }) => device.status === "critical").length;
   const warningCount = allDeviceRecords.filter(({ device }) => device.status === "warning").length;
+
+  const handleExcelImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setExcelImport({ status: "loading", message: `正在讀取 ${file.name}…`, fileName: file.name });
+
+    try {
+      const records = await readLubricationWorkbook(file);
+      const nextSegments = applyImportedRecords(segments, records);
+      const importedDeviceIds = new Set(records.map((record) => record.deviceId));
+      const latestRecord = [...records].sort((a, b) => a.measuredAt.localeCompare(b.measuredAt)).at(-1)!;
+      const latestSegment = nextSegments.find((segment) => segment.devices.some((device) => device.id === latestRecord.deviceId));
+
+      setActiveSegments(nextSegments);
+      if (latestSegment) {
+        setSelectedSegmentId(latestSegment.id);
+        setSelectedDeviceId(latestRecord.deviceId);
+        setComparedDeviceIds([latestRecord.deviceId]);
+      }
+      setExcelImport({
+        status: "success",
+        message: `已匯入 ${records.length} 筆紀錄，更新 ${importedDeviceIds.size} 台設備。未出現在 Excel 的設備保留示範資料。`,
+        fileName: file.name,
+        recordCount: records.length,
+        deviceCount: importedDeviceIds.size,
+        latestMeasuredAt: latestRecord.measuredAt,
+      });
+    } catch (error) {
+      const details = error instanceof LubricationImportError
+        ? error.details
+        : [error instanceof Error ? error.message : "Excel 讀取失敗，請確認檔案格式。"];
+      setExcelImport({
+        status: "error",
+        message: "Excel 匯入失敗，請修正以下內容後再試一次。",
+        fileName: file.name,
+        errors: details,
+      });
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const resetExcelImport = () => {
+    setActiveSegments(segments);
+    setSelectedSegmentId("Y10-Y11");
+    setSelectedDeviceId("LB4");
+    setComparedDeviceIds(["LB4"]);
+    setExcelImport({ status: "idle", message: "已回復網站內建示範資料。" });
+  };
 
   const chooseDefaultDevice = (segment: Segment) => {
     return [...segment.devices].sort((a, b) => (
@@ -660,7 +793,7 @@ export default function Home() {
 
   const renderTopology = (activeLayout: RouteLayout) => (
     <>
-      {segments.map((segment) => {
+      {activeSegments.map((segment) => {
         const geometry = activeLayout.segmentGeometry[segment.id];
         if (!geometry) return null;
         const active = selectedSegmentId === segment.id;
@@ -696,7 +829,7 @@ export default function Home() {
         const point = activeLayout.stationPoints[station.id];
         if (!point) return null;
         const active = selectedSegment.from === index || selectedSegment.to === index;
-        const state = stationStatus(index);
+        const state = stationStatus(index, activeSegments);
         return (
           <div
             className={`map-station station-${station.id.toLowerCase()} label-${point.labelSide} ${active ? "selected" : ""}`}
@@ -732,7 +865,7 @@ export default function Home() {
           <a href="/wear" className="nav-item">正面軌道總覽</a>
           <a href="/side-wear" className="nav-item">側面軌道總覽</a>
         </nav>
-        <div className="sync-state"><span className="pulse-dot"></span>UI 草圖 · 模擬資料</div>
+        <div className="sync-state"><span className="pulse-dot"></span>{excelImport.status === "success" ? "Excel 資料已載入" : "UI 草圖 · 模擬資料"}</div>
       </header>
 
       <section className="page-content">
@@ -742,13 +875,35 @@ export default function Home() {
             <h2>從軌道線段直接定位設備</h2>
             <p>區間長度依設備數量自動配置；點軌道查看單台設備，再勾選同區間設備即可在一張圖比較多條曲線。</p>
           </div>
-          <div className="updated-at">資料時間 <strong>2026-07-24 16:30</strong></div>
+          <div className="updated-at">資料時間 <strong>{excelImport.latestMeasuredAt ? formatMeasurementTime(excelImport.latestMeasuredAt) : "2026-07-24 16:30"}</strong></div>
         </div>
+
+        <section className={`excel-import-panel ${excelImport.status}`} aria-labelledby="excel-import-title">
+          <div className="excel-import-icon" aria-hidden="true"><span>XL</span></div>
+          <div className="excel-import-copy">
+            <span className="panel-kicker">LUBRICATION DATA IMPORT</span>
+            <h3 id="excel-import-title">匯入潤滑設備 Excel</h3>
+            <p>第一張工作表須包含：設備編號、量測時間、油量（L）、檢修人員、紀錄類型、補油量（L）。</p>
+          </div>
+          <div className="excel-import-actions">
+            <a className="excel-template-link" href="/潤滑設備量測匯入範本.xlsx" download>下載 Excel 範本</a>
+            <button type="button" className="excel-import-button" onClick={() => excelInputRef.current?.click()} disabled={excelImport.status === "loading"}>
+              {excelImport.status === "loading" ? "讀取中…" : "選擇 Excel 匯入"}
+            </button>
+            <input ref={excelInputRef} className="visually-hidden-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleExcelImport} />
+            {excelImport.status === "success" ? <button type="button" className="excel-reset-button" onClick={resetExcelImport}>回復示範資料</button> : null}
+          </div>
+          <div className="excel-import-result" role="status" aria-live="polite">
+            <strong>{excelImport.status === "error" ? "需要修正" : excelImport.status === "success" ? "匯入完成" : excelImport.status === "loading" ? "正在處理" : "尚未匯入"}</strong>
+            <span>{excelImport.message}</span>
+            {excelImport.errors?.length ? <ul>{excelImport.errors.map((error) => <li key={error}>{error}</li>)}</ul> : null}
+          </div>
+        </section>
 
         <section className="summary-grid" aria-label="全線摘要">
           <article className="summary-card danger-card"><span>需處理設備</span><strong>{criticalCount}</strong><small>優先安排現場複查</small></article>
           <article className="summary-card warning-card"><span>注意設備</span><strong>{warningCount}</strong><small>持續觀察下降趨勢</small></article>
-          <article className="summary-card"><span>固定潤滑設備</span><strong>20</strong><small>MOK 10 · LB 10</small></article>
+          <article className="summary-card"><span>固定潤滑設備</span><strong>{allDeviceRecords.length}</strong><small>MOK 10 · LB 10</small></article>
         </section>
 
         <section className="workspace-grid" ref={workspaceRef}>
@@ -783,7 +938,7 @@ export default function Home() {
 
             <div className="mobile-route-list" aria-label="環狀線行動版設備列表">
               {routeStations.map((station, routeIndex) => {
-                const nextSegment = routeSegments[routeIndex];
+                const nextSegment = activeRouteSegments[routeIndex];
                 return (
                   <div className="mobile-route-item" key={station.id}>
                     <div className="mobile-station"><span>{station.id}</span><strong>{station.name}</strong></div>
@@ -865,6 +1020,13 @@ export default function Home() {
                   <div><span>目前油量</span><strong>{selectedDevice.value} L</strong></div>
                   <div><span>相比前次</span><strong className={selectedDevice.change < 0 ? "danger-text" : ""}>{formatChange(selectedDevice.change)}</strong></div>
                   <div><span>所在軌道</span><strong>{selectedDevice.direction === "up" ? "MOK 上行" : "LB 下行"}</strong></div>
+                  {selectedDevice.latestRecord ? (
+                    <>
+                      <div><span>最新量測</span><strong>{formatMeasurementTime(selectedDevice.latestRecord.measuredAt)}</strong></div>
+                      <div><span>檢修人員</span><strong>{selectedDevice.latestRecord.inspector}</strong></div>
+                      <div><span>紀錄類型</span><strong>{selectedDevice.latestRecord.recordType}{selectedDevice.latestRecord.refillAmount ? ` · +${selectedDevice.latestRecord.refillAmount} L` : ""}</strong></div>
+                    </>
+                  ) : null}
                 </div>
                 <div className="comparison-strip">
                   <span>圖表已勾選</span>
