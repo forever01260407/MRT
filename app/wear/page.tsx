@@ -5,7 +5,8 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as Re
 
 type RailStatus = "normal" | "warning" | "critical";
 type RailSide = "left" | "right";
-type RailSideFilter = "all" | RailSide;
+type Direction = "up" | "down";
+type DirectionFilter = "all" | Direction;
 export type WearMode = "tread" | "side";
 type LabelSide = "right" | "top" | "bottom" | "upper-left" | "upper-right" | "lower-left" | "lower-right";
 
@@ -17,6 +18,7 @@ type WearHistoryPoint = {
   method: string;
 };
 type WearReading = {
+  direction: Direction;
   side: RailSide;
   wear: number;
   change: number;
@@ -24,6 +26,7 @@ type WearReading = {
   history: WearHistoryPoint[];
 };
 type MonitorPoint = {
+  direction: Direction;
   number: number;
   segmentId: string;
   from: Station;
@@ -74,7 +77,7 @@ const stationLabelSides: Record<string, LabelSide> = {
 
 const stationById = Object.fromEntries(wearStations.map((station) => [station.id, station])) as Record<string, Station>;
 
-const monitorAssignments = [
+const upMonitorAssignments = [
   { numbers: [1, 2], segmentId: "Y8-Y7", fromId: "Y7", toId: "Y8" },
   { numbers: [3, 4, 5, 6, 7], segmentId: "Y11-Y10", fromId: "Y10", toId: "Y11" },
   { numbers: [8, 9], segmentId: "Y12-Y11", fromId: "Y11", toId: "Y12" },
@@ -84,7 +87,26 @@ const monitorAssignments = [
   { numbers: [14, 15], segmentId: "Y19-Y18", fromId: "Y18", toId: "Y19" },
 ] as const;
 
-const monitorCountBySegment = Object.fromEntries(monitorAssignments.map((assignment) => [assignment.segmentId, assignment.numbers.length])) as Record<string, number>;
+const downMonitorAssignments = [
+  { numbers: [1, 2], segmentId: "Y8-Y7", fromId: "Y8", toId: "Y7" },
+  { numbers: [3, 4, 5, 6], segmentId: "Y11-Y10", fromId: "Y11", toId: "Y10" },
+  { numbers: [7, 8], segmentId: "Y12-Y11", fromId: "Y12", toId: "Y11" },
+  { numbers: [9, 10], segmentId: "Y15-Y14", fromId: "Y15", toId: "Y14" },
+  { numbers: [11], segmentId: "Y16-Y15", fromId: "Y16", toId: "Y15" },
+  { numbers: [12, 13], segmentId: "Y17-Y16", fromId: "Y17", toId: "Y16" },
+  { numbers: [14], segmentId: "Y18-Y17", fromId: "Y18", toId: "Y17" },
+  { numbers: [15, 16], segmentId: "Y19-Y18", fromId: "Y19", toId: "Y18" },
+] as const;
+
+const monitorCountBySegment = Object.fromEntries(routeSegmentsSeed().map((segmentId) => {
+  const upCount = upMonitorAssignments.find((assignment) => assignment.segmentId === segmentId)?.numbers.length ?? 0;
+  const downCount = downMonitorAssignments.find((assignment) => assignment.segmentId === segmentId)?.numbers.length ?? 0;
+  return [segmentId, Math.max(upCount, downCount)];
+})) as Record<string, number>;
+
+function routeSegmentsSeed() {
+  return wearStations.slice(0, -1).map((station, index) => `${station.id}-${wearStations[index + 1].id}`);
+}
 const routeSegments: RouteSegment[] = wearStations.slice(0, -1).map((station, index) => {
   const to = wearStations[index + 1];
   const id = `${station.id}-${to.id}`;
@@ -95,6 +117,10 @@ const treadLeftWear = [1.4, 1.8, 2.7, 2.4, 3.1, 1.9, 2.6, 1.7, 2.1, 2.8, 3.2, 1.
 const treadRightWear = [1.6, 2.1, 2.5, 2.8, 3.3, 2.2, 2.9, 1.8, 2.4, 2.6, 3.1, 1.9, 2.7, 2.0, 2.45];
 const sideLeftWear = [3.1, 4.4, 7.2, 5.1, 6.8, 4.6, 8.7, 3.6, 5.8, 7.9, 6.4, 4.1, 2.9, 6.4, 3.3];
 const sideRightWear = [2.8, 3.9, 5.5, 7.0, 4.6, 6.8, 3.5, 6.1, 6.75, 3.7, 6.2, 4.2, 2.6, 5.9, 7.3];
+const treadDownLeftWear = [1.5, 1.9, 2.6, 2.2, 3.05, 2.1, 2.5, 1.7, 2.9, 3.15, 1.8, 2.4, 2.75, 2.0, 2.3, 3.2];
+const treadDownRightWear = [1.7, 2.0, 2.4, 2.7, 3.2, 2.3, 2.8, 1.9, 2.6, 3.3, 2.0, 2.55, 2.9, 2.2, 2.45, 3.4];
+const sideDownLeftWear = [3.4, 4.1, 6.9, 5.4, 7.4, 4.9, 6.2, 5.7, 7.6, 6.5, 4.3, 5.9, 7.1, 3.8, 6.6, 7.8];
+const sideDownRightWear = [3.0, 4.5, 5.8, 7.2, 4.8, 6.6, 3.9, 6.4, 6.9, 4.1, 6.0, 4.5, 6.8, 3.2, 5.7, 7.5];
 
 const wearModeConfig = {
   tread: {
@@ -117,6 +143,7 @@ const wearModeConfig = {
 
 const statusText: Record<RailStatus, string> = { normal: "正常", warning: "注意", critical: "需處理" };
 const sideText: Record<RailSide, string> = { left: "左軌", right: "右軌" };
+const directionText: Record<Direction, string> = { up: "上行", down: "下行" };
 const statusPriority: Record<RailStatus, number> = { normal: 1, warning: 2, critical: 3 };
 
 function wearStatus(wear: number, mode: WearMode): RailStatus {
@@ -130,7 +157,15 @@ function railCode(pointNumber: number, side: RailSide) {
   return `${side === "left" ? "L" : "R"}${pointNumber}`;
 }
 
-function makeReading(side: RailSide, wear: number, index: number, mode: WearMode): WearReading {
+function railKey(direction: Direction, pointNumber: number, side: RailSide) {
+  return `${direction}-${railCode(pointNumber, side)}`;
+}
+
+function mapRailCode(direction: Direction, pointNumber: number, side: RailSide) {
+  return `${direction === "up" ? "上" : "下"}${side === "left" ? "L" : "R"}${pointNumber}`;
+}
+
+function makeReading(direction: Direction, side: RailSide, wear: number, index: number, mode: WearMode): WearReading {
   const dates = ["2026-01-18", "2026-02-27", "2026-04-14", "2026-05-01", "2026-05-29", "2026-06-21", `2026-07-${String(24 - (index % 5)).padStart(2, "0")}`];
   const totalGrowth = mode === "tread" ? 0.45 + (index % 4) * 0.1 : 1.0 + (index % 4) * 0.24;
   const values = dates.map((_, historyIndex) => {
@@ -149,24 +184,27 @@ function makeReading(side: RailSide, wear: number, index: number, mode: WearMode
     };
   });
   const latest = history[history.length - 1];
-  return { side, wear, change: latest.change, inspectedAt: latest.date, history };
+  return { direction, side, wear, change: latest.change, inspectedAt: latest.date, history };
 }
 
-function buildMonitorPoints(mode: WearMode, leftValues: number[], rightValues: number[]): MonitorPoint[] {
-  return monitorAssignments.flatMap((assignment) => assignment.numbers.map((number) => ({
+function buildMonitorPoints(direction: Direction, assignments: readonly { numbers: readonly number[]; segmentId: string; fromId: string; toId: string }[], mode: WearMode, leftValues: number[], rightValues: number[]): MonitorPoint[] {
+  return assignments.flatMap((assignment) => assignment.numbers.map((number) => ({
+    direction,
     number,
     segmentId: assignment.segmentId,
     from: stationById[assignment.fromId],
     to: stationById[assignment.toId],
     readings: {
-      left: makeReading("left", leftValues[number - 1], number - 1, mode),
-      right: makeReading("right", rightValues[number - 1], number - 1, mode),
+      left: makeReading(direction, "left", leftValues[number - 1], number - 1, mode),
+      right: makeReading(direction, "right", rightValues[number - 1], number - 1, mode),
     },
   })));
 }
 
-const treadMonitorPoints = buildMonitorPoints("tread", treadLeftWear, treadRightWear);
-const sideMonitorPoints = buildMonitorPoints("side", sideLeftWear, sideRightWear);
+const treadUpMonitorPoints = buildMonitorPoints("up", upMonitorAssignments, "tread", treadLeftWear, treadRightWear);
+const treadDownMonitorPoints = buildMonitorPoints("down", downMonitorAssignments, "tread", treadDownLeftWear, treadDownRightWear);
+const sideUpMonitorPoints = buildMonitorPoints("up", upMonitorAssignments, "side", sideLeftWear, sideRightWear);
+const sideDownMonitorPoints = buildMonitorPoints("down", downMonitorAssignments, "side", sideDownLeftWear, sideDownRightWear);
 
 function calculateRouteLayout(width: number, height: number): RouteLayout {
   const safeWidth = Math.max(width, 760);
@@ -303,18 +341,20 @@ function WearHistoryChart({ reading, code, config, expanded = false }: {
 export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }) {
   const mapRef = useRef<HTMLDivElement>(null);
   const expandedMapRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
   const dragRef = useRef({ pointerId: -1, startX: 0, startY: 0, originX: 0, originY: 0 });
   const [mapSize, setMapSize] = useState({ width: 1200, height: 700 });
   const [expandedMapSize, setExpandedMapSize] = useState({ width: 1500, height: 760 });
+  const [selectedDirection, setSelectedDirection] = useState<Direction>("up");
   const [selectedPointNumber, setSelectedPointNumber] = useState(5);
   const [selectedRailSide, setSelectedRailSide] = useState<RailSide>("left");
-  const [railSideFilter, setRailSideFilter] = useState<RailSideFilter>("all");
+  const [directionFilter, setDirectionFilter] = useState<DirectionFilter>("all");
   const [isExpanded, setIsExpanded] = useState(false);
   const [isChartExpanded, setIsChartExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [mapViewport, setMapViewport] = useState({ x: 0, y: 0, scale: 1 });
   const config = wearModeConfig[mode];
-  const monitorPoints = mode === "side" ? sideMonitorPoints : treadMonitorPoints;
+  const monitorPoints = mode === "side" ? [...sideUpMonitorPoints, ...sideDownMonitorPoints] : [...treadUpMonitorPoints, ...treadDownMonitorPoints];
   const getWearStatus = (wear: number) => wearStatus(wear, mode);
 
   useEffect(() => {
@@ -360,23 +400,43 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
 
   const layout = useMemo(() => calculateRouteLayout(mapSize.width, mapSize.height), [mapSize]);
   const expandedLayout = useMemo(() => calculateRouteLayout(expandedMapSize.width, expandedMapSize.height), [expandedMapSize]);
-  const selectedPoint = monitorPoints.find((point) => point.number === selectedPointNumber) ?? monitorPoints[4];
+  const selectedPoint = monitorPoints.find((point) => point.direction === selectedDirection && point.number === selectedPointNumber) ?? monitorPoints[4];
   const selectedReading = selectedPoint.readings[selectedRailSide];
   const selectedCode = railCode(selectedPoint.number, selectedRailSide);
+  const selectedDisplayCode = `${directionText[selectedPoint.direction]} ${selectedCode}`;
   const selectedStatus = getWearStatus(selectedReading.wear);
   const allRails = monitorPoints.flatMap((point) => [point.readings.left, point.readings.right]);
   const criticalCount = allRails.filter((reading) => getWearStatus(reading.wear) === "critical").length;
   const warningCount = allRails.filter((reading) => getWearStatus(reading.wear) === "warning").length;
   const normalCount = allRails.length - criticalCount - warningCount;
+  const criticalRails = monitorPoints
+    .flatMap((point) => (["left", "right"] as RailSide[]).map((side) => ({ point, side, reading: point.readings[side] })))
+    .filter(({ reading }) => getWearStatus(reading.wear) === "critical")
+    .sort((a, b) => b.reading.wear - a.reading.wear);
 
   const selectRail = (point: MonitorPoint, side: RailSide) => {
+    setSelectedDirection(point.direction);
     setSelectedPointNumber(point.number);
     setSelectedRailSide(side);
   };
 
-  const selectRailSideFilter = (filter: RailSideFilter) => {
-    setRailSideFilter(filter);
-    if (filter !== "all") setSelectedRailSide(filter);
+  const locateRailOnMap = (point: MonitorPoint, side: RailSide) => {
+    selectRail(point, side);
+    setDirectionFilter(point.direction);
+    window.requestAnimationFrame(() => {
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      workspaceRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+    });
+  };
+
+  const selectDirectionFilter = (filter: DirectionFilter) => {
+    setDirectionFilter(filter);
+    if (filter !== "all" && filter !== selectedDirection) {
+      const sameNumber = monitorPoints.find((point) => point.direction === filter && point.number === selectedPointNumber);
+      const fallback = monitorPoints.find((point) => point.direction === filter);
+      setSelectedDirection(filter);
+      setSelectedPointNumber((sameNumber ?? fallback)?.number ?? 1);
+    }
   };
 
   const stationStatus = (station: Station) => {
@@ -389,26 +449,29 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
     <>
       {routeSegments.map((segment) => {
         const geometry = activeLayout.segmentGeometry[segment.id];
-        const segmentPoints = monitorPoints.filter((point) => point.segmentId === segment.id).sort((a, b) => b.number - a.number);
         const active = selectedPoint.segmentId === segment.id;
-        const renderLane = (side: RailSide) => {
-          if (!segmentPoints.length) return <span className="fallback-track unknown" aria-hidden="true"></span>;
+        const renderLane = (direction: Direction, side: RailSide) => {
+          const segmentPoints = monitorPoints
+            .filter((point) => point.segmentId === segment.id && point.direction === direction)
+            .sort((a, b) => direction === "up" ? b.number - a.number : a.number - b.number);
+          const filteredOut = directionFilter !== "all" && directionFilter !== direction;
+          if (!segmentPoints.length) return <span className={`fallback-track unknown ${filteredOut ? "filtered-out" : ""}`} aria-hidden="true"></span>;
           return segmentPoints.map((point) => {
             const reading = point.readings[side];
             const code = railCode(point.number, side);
-            const selected = selectedPointNumber === point.number && selectedRailSide === side;
-            const filteredOut = railSideFilter !== "all" && railSideFilter !== side;
+            const mapCode = mapRailCode(direction, point.number, side);
+            const selected = selectedDirection === direction && selectedPointNumber === point.number && selectedRailSide === side;
             return (
               <button
                 type="button"
-                key={code}
+                key={railKey(direction, point.number, side)}
                 className={`device-track ${getWearStatus(reading.wear)} ${selected ? "selected" : ""} ${filteredOut ? "filtered-out" : ""}`}
                 onClick={(event) => { event.stopPropagation(); selectRail(point, side); }}
                 aria-pressed={selected}
-                title={`${code}｜${sideText[side]}｜${config.measurement} ${reading.wear} mm｜${statusText[getWearStatus(reading.wear)]}`}
-                aria-label={`${code}，上行${sideText[side]}，${config.measurement} ${reading.wear} 毫米，${statusText[getWearStatus(reading.wear)]}`}
+                title={`${directionText[direction]} ${code}｜${sideText[side]}｜${config.measurement} ${reading.wear} mm｜${statusText[getWearStatus(reading.wear)]}`}
+                aria-label={`${directionText[direction]} ${code}，${sideText[side]}，${config.measurement} ${reading.wear} 毫米，${statusText[getWearStatus(reading.wear)]}`}
               >
-                <span className={`device-track-label label-${side === "left" ? "up" : "down"}`} style={{ transform: `translateX(-50%) rotate(${-geometry.angle}deg)` }}>{code}</span>
+                <span className={`device-track-label wear-label-${direction}-${side}`} style={{ transform: `translateX(-50%) rotate(${-geometry.angle}deg)` }}>{mapCode}</span>
               </button>
             );
           });
@@ -419,8 +482,10 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
             key={segment.id}
             style={{ left: `${geometry.x.toFixed(2)}px`, top: `${geometry.y.toFixed(2)}px`, width: `${geometry.length.toFixed(2)}px`, transform: `translateY(-50%) rotate(${geometry.angle}deg)` }}
           >
-            <div className="track-lane lane-up">{renderLane("left")}</div>
-            <div className="track-lane lane-down">{renderLane("right")}</div>
+            <div className="track-lane wear-lane-up-right">{renderLane("up", "right")}</div>
+            <div className="track-lane wear-lane-up-left">{renderLane("up", "left")}</div>
+            <div className="track-lane wear-lane-down-left">{renderLane("down", "left")}</div>
+            <div className="track-lane wear-lane-down-right">{renderLane("down", "right")}</div>
           </div>
         );
       })}
@@ -476,63 +541,65 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
           <a href="/wear" className={`nav-item ${mode === "tread" ? "active" : ""}`} aria-current={mode === "tread" ? "page" : undefined}>正面軌道總覽</a>
           <a href="/side-wear" className={`nav-item ${mode === "side" ? "active" : ""}`} aria-current={mode === "side" ? "page" : undefined}>側面軌道總覽</a>
         </nav>
-        <div className="sync-state"><span className="pulse-dot"></span>上行 · {config.measurement} · 示範模式</div>
+        <div className="sync-state"><span className="pulse-dot"></span>上／下行 · {config.measurement} · 示範模式</div>
       </header>
 
       <section className="page-content">
         <div className="page-heading">
           <div>
-            <p className="eyebrow dark">UP LINE · {config.englishTitle}</p>
-            <h2>上行 · {config.title}</h2>
-            <p>依 Excel 上行表配置15個監測點，每個監測點分成左軌 L1～L15與右軌 R1～R15。</p>
+            <p className="eyebrow dark">UP &amp; DOWN LINE · {config.englishTitle}</p>
+            <h2>{config.title}</h2>
+            <p>保留上行15個監測點，新增下行16個監測點；每個監測點皆分成左軌與右軌。</p>
           </div>
           <div className="updated-at">資料時間 <strong>2026-07-24 16:30</strong></div>
         </div>
 
-        <section className="summary-grid wear-summary-grid" aria-label={`上行${config.title}摘要`}>
+        <section className="summary-grid wear-summary-grid" aria-label={`${config.title}摘要`}>
           <article className="summary-card danger-card"><span>需處理軌道</span><strong>{criticalCount}</strong><small>示範警戒值達 {config.critical} mm</small></article>
           <article className="summary-card warning-card"><span>注意軌道</span><strong>{warningCount}</strong><small>{config.warning}–{config.critical - 0.1} mm</small></article>
           <article className="summary-card"><span>正常軌道</span><strong>{normalCount}</strong><small>低於 {config.warning} mm</small></article>
-          <article className="summary-card"><span>上行監測軌道</span><strong>{allRails.length}</strong><small>15 點 × 左右軌</small></article>
+          <article className="summary-card"><span>監測軌道總數</span><strong>{allRails.length}</strong><small>上行15點＋下行16點 × 左右軌</small></article>
         </section>
 
-        <section className="workspace-grid">
+        <section className="workspace-grid" ref={workspaceRef}>
           <article className="panel route-panel">
             <div className="panel-heading">
-              <div><span className="panel-kicker">上行 · 15個監測點 · 左右軌獨立判定</span><h3>Y19 新北產業園區－Y6 大坪林</h3></div>
+              <div><span className="panel-kicker">上行15點 · 下行16點 · 四軌獨立判定</span><h3>Y19 新北產業園區－Y6 大坪林</h3></div>
               <div className="map-heading-actions wear-map-actions">
                 <div className="legend" aria-label="磨損狀態圖例">
                   <span><i className="legend-line normal"></i>正常</span>
                   <span><i className="legend-line warning"></i>注意</span>
                   <span><i className="legend-line critical"></i>需處理</span>
                 </div>
-                <div className="direction-filter" role="group" aria-label="顯示左右軌">
-                  {(["all", "left", "right"] as RailSideFilter[]).map((filter) => (
-                    <button type="button" key={filter} className={railSideFilter === filter ? "active" : ""} onClick={() => selectRailSideFilter(filter)}>{filter === "all" ? "全部" : sideText[filter]}</button>
+                <div className="direction-filter" role="group" aria-label="顯示上行或下行">
+                  {(["all", "up", "down"] as DirectionFilter[]).map((filter) => (
+                    <button type="button" key={filter} className={directionFilter === filter ? "active" : ""} onClick={() => selectDirectionFilter(filter)}>{filter === "all" ? "全部" : directionText[filter]}</button>
                   ))}
                 </div>
                 <button type="button" className="expand-map-button" onClick={() => { setMapViewport({ x: 0, y: 0, scale: 1 }); setIsExpanded(true); }} aria-haspopup="dialog"><i aria-hidden="true">⛶</i>放大地圖</button>
               </div>
             </div>
 
-            <div className="topology-stage wear-topology-stage" ref={mapRef} role="group" aria-label={`環狀線上行${config.title}地圖`}>
+            <div className="topology-stage wear-topology-stage wear-four-track-stage" ref={mapRef} role="group" aria-label={`環狀線上行與下行${config.title}地圖`}>
               <div className="map-orientation"><span>北</span><i></i></div>
               {renderTopology(layout)}
             </div>
 
             <div className="wear-route-footnote">
-              <span><i className="wear-direction-sample up"></i>左軌 L1～L15</span>
-              <span><i className="wear-direction-sample down"></i>右軌 R1～R15</span>
+              <span><i className="wear-direction-sample up"></i>上行R</span>
+              <span><i className="wear-direction-sample up"></i>上行L</span>
+              <span><i className="wear-direction-sample down"></i>下行L</span>
+              <span><i className="wear-direction-sample down"></i>下行R</span>
               <p>點擊任一條編號軌道，即可查看該監測點的磨損與歷史資料。</p>
             </div>
 
-            <div className="wear-mobile-list" aria-label="手機版上行監測點清單">
+            <div className="wear-mobile-list" aria-label="手機版上行與下行監測點清單">
               {monitorPoints.map((point) => (
-                <article key={point.number} className={selectedPointNumber === point.number ? "selected" : ""}>
-                  <strong>監測點 {point.number} · {point.from.name}－{point.to.name}</strong>
+                <article key={`${point.direction}-${point.number}`} className={selectedDirection === point.direction && selectedPointNumber === point.number ? "selected" : ""}>
+                  <strong>{directionText[point.direction]}監測點 {point.number} · {point.from.name}－{point.to.name}</strong>
                   <div>
                     {(["left", "right"] as RailSide[]).map((side) => (
-                      <button key={side} type="button" className={getWearStatus(point.readings[side].wear)} onClick={() => selectRail(point, side)}>{railCode(point.number, side)} {point.readings[side].wear} mm</button>
+                      <button key={side} type="button" className={getWearStatus(point.readings[side].wear)} onClick={() => selectRail(point, side)}>{mapRailCode(point.direction, point.number, side)} {point.readings[side].wear} mm</button>
                     ))}
                   </div>
                 </article>
@@ -542,7 +609,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
 
           <article className="panel wear-detail-panel">
             <div className="wear-detail-heading">
-              <div><span className="panel-kicker">目前選取 · 上行{sideText[selectedRailSide]} · {config.measurement}</span><h3>{selectedCode}｜監測點 {selectedPoint.number}｜{selectedPoint.from.id} {selectedPoint.from.name}－{selectedPoint.to.id} {selectedPoint.to.name}</h3></div>
+              <div><span className="panel-kicker">目前選取 · {directionText[selectedPoint.direction]}{sideText[selectedRailSide]} · {config.measurement}</span><h3>{selectedDisplayCode}｜監測點 {selectedPoint.number}｜{selectedPoint.from.id} {selectedPoint.from.name}－{selectedPoint.to.id} {selectedPoint.to.name}</h3></div>
               <span className={`status-pill ${selectedStatus}`}>{statusText[selectedStatus]}</span>
             </div>
 
@@ -553,7 +620,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
             </div>
 
             <div className="wear-reading-grid">
-              <div><span>軌道編號</span><strong>{selectedCode}</strong></div>
+              <div><span>軌道編號</span><strong>{selectedDisplayCode}</strong></div>
               <div><span>{config.measurement}</span><strong>{selectedReading.wear.toFixed(2)} mm</strong></div>
               <div><span>Excel 項次</span><strong>{selectedPoint.number}</strong></div>
               <div><span>較前次增加</span><strong>+{selectedReading.change.toFixed(2)} mm</strong></div>
@@ -562,43 +629,66 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
             </div>
 
             <div className="wear-gauge-card">
-              <div><strong>{selectedCode} {config.measurement}程度</strong><span>{Math.round(selectedReading.wear / config.scaleMax * 100)}%</span></div>
+              <div><strong>{selectedDisplayCode} {config.measurement}程度</strong><span>{Math.round(selectedReading.wear / config.scaleMax * 100)}%</span></div>
               <div className="wear-gauge"><i className={selectedStatus} style={{ width: `${Math.min(100, selectedReading.wear / config.scaleMax * 100)}%` }}></i><b style={{ left: `${config.critical / config.scaleMax * 100}%` }}></b></div>
               <div className="wear-gauge-scale"><span>0 mm</span><span>注意 {config.warning} mm</span><span>警戒 {config.critical} mm</span><span>{config.scaleMax} mm</span></div>
             </div>
 
             <aside className={`wear-maintenance-note ${selectedStatus}`}>
               <strong>{selectedStatus === "critical" ? "建議安排現場複查" : selectedStatus === "warning" ? "建議提高巡檢頻率" : "維持例行巡檢"}</strong>
-              <p>{selectedStatus === "critical" ? `${selectedCode} 已達示範警戒值，請確認量測位置並安排研磨或更換評估。` : selectedStatus === "warning" ? `${selectedCode} 尚未達示範警戒值，建議觀察下次量測的增加速度。` : `${selectedCode} 目前在正常範圍內，依原訂週期持續追蹤即可。`}</p>
+              <p>{selectedStatus === "critical" ? `${selectedDisplayCode} 已達示範警戒值，請確認量測位置並安排研磨或更換評估。` : selectedStatus === "warning" ? `${selectedDisplayCode} 尚未達示範警戒值，建議觀察下次量測的增加速度。` : `${selectedDisplayCode} 目前在正常範圍內，依原訂週期持續追蹤即可。`}</p>
             </aside>
           </article>
 
           <article className="panel wear-history-panel">
             <div className="wear-history-heading">
-              <div><span className="panel-kicker">歷史資料 · 隨目前軌道自動更新</span><h3>{selectedCode} · {selectedPoint.from.name}－{selectedPoint.to.name}</h3><p>顯示上行{sideText[selectedRailSide]}最近七次{config.measurement}趨勢。</p></div>
+              <div><span className="panel-kicker">歷史資料 · 隨目前軌道自動更新</span><h3>{selectedDisplayCode} · {selectedPoint.from.name}－{selectedPoint.to.name}</h3><p>顯示{directionText[selectedPoint.direction]}{sideText[selectedRailSide]}最近七次{config.measurement}趨勢。</p></div>
               <button type="button" className="expand-chart-button" onClick={() => setIsChartExpanded(true)} aria-haspopup="dialog"><i aria-hidden="true">⛶</i>放大圖表</button>
             </div>
-            <WearHistoryChart reading={selectedReading} code={selectedCode} config={config} />
+            <WearHistoryChart reading={selectedReading} code={selectedDisplayCode} config={config} />
             <div className="wear-history-table-shell">
               <table className="wear-history-table">
-                <caption>{selectedCode} 上行{sideText[selectedRailSide]}逐次量測紀錄（示範資料）</caption>
+                <caption>{selectedDisplayCode} {sideText[selectedRailSide]}逐次量測紀錄（示範資料）</caption>
                 <thead><tr><th scope="col">量測日期</th><th scope="col">軌道編號</th><th scope="col">{config.measurement}</th><th scope="col">較前次</th><th scope="col">狀態</th><th scope="col">資料來源</th></tr></thead>
                 <tbody>
                   {[...selectedReading.history].reverse().map((point) => {
                     const pointStatus = getWearStatus(point.wear);
-                    return <tr key={point.date}><td>{point.date}</td><td><strong>{selectedCode}</strong></td><td><strong>{point.wear.toFixed(2)} mm</strong></td><td className={point.change > 0 ? "wear-increase" : ""}>{point.change === 0 ? "起始" : `+${point.change.toFixed(2)} mm`}</td><td><span className={`wear-history-status ${pointStatus}`}>{statusText[pointStatus]}</span></td><td>{point.method}</td></tr>;
+                    return <tr key={point.date}><td>{point.date}</td><td><strong>{selectedDisplayCode}</strong></td><td><strong>{point.wear.toFixed(2)} mm</strong></td><td className={point.change > 0 ? "wear-increase" : ""}>{point.change === 0 ? "起始" : `+${point.change.toFixed(2)} mm`}</td><td><span className={`wear-history-status ${pointStatus}`}>{statusText[pointStatus]}</span></td><td>{point.method}</td></tr>;
                   })}
                 </tbody>
               </table>
             </div>
           </article>
         </section>
+
+        <section className="panel alerts-panel wear-alerts-panel">
+          <div className="panel-heading">
+            <div><span className="panel-kicker">紅色異常清單 · {config.measurement}</span><h3>優先處理軌道</h3></div>
+            <span className="alerts-count">{criticalRails.length} 條軌道需處理</span>
+          </div>
+          <div className="alerts-table" role="table" aria-label={`${config.measurement}紅色異常軌道清單`}>
+            <div className="table-row table-head" role="row"><span>軌道</span><span>目前磨耗量</span><span>軌道位置</span><span>相比前次</span><span>操作</span></div>
+            {criticalRails.map(({ point, side, reading }) => {
+              const code = `${directionText[point.direction]} ${railCode(point.number, side)}`;
+              return (
+                <div className="table-row" role="row" key={railKey(point.direction, point.number, side)}>
+                  <strong>{code}</strong>
+                  <span><b className="danger-text">{reading.wear.toFixed(2)} mm</b></span>
+                  <span>{point.from.id} {point.from.name}－{point.to.id} {point.to.name}</span>
+                  <span className="danger-text">+{reading.change.toFixed(2)} mm</span>
+                  <button type="button" className="table-action" onClick={() => locateRailOnMap(point, side)}>在圖上定位</button>
+                </div>
+              );
+            })}
+            {!criticalRails.length && <div className="wear-alerts-empty">目前沒有達到紅色警戒的軌道。</div>}
+          </div>
+        </section>
       </section>
 
       {isExpanded && (
         <div className="map-modal-backdrop" role="presentation">
           <section className="map-modal wear-map-modal" role="dialog" aria-modal="true" aria-labelledby="wear-map-modal-title">
-            <header className="map-modal-header"><div><span className="panel-kicker">上行 · {config.title}</span><h3 id="wear-map-modal-title">拖曳與縮放查看 L1～L15、R1～R15</h3><p>點擊任一軌道後，關閉視窗即可查看詳細資料。</p></div><button type="button" className="chart-modal-close" onClick={() => setIsExpanded(false)} aria-label="關閉放大地圖">×</button></header>
+            <header className="map-modal-header"><div><span className="panel-kicker">上行／下行 · {config.title}</span><h3 id="wear-map-modal-title">拖曳與縮放查看四條軌道</h3><p>由上到下為上行R、上行L、下行L、下行R；點擊後可查看詳細資料。</p></div><button type="button" className="chart-modal-close" onClick={() => setIsExpanded(false)} aria-label="關閉放大地圖">×</button></header>
             <div className="map-modal-viewport-shell">
               <div className={`map-modal-viewport ${isDragging ? "dragging" : ""}`} ref={expandedMapRef} onWheel={handleWheel} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerEnd} onPointerCancel={handlePointerEnd}>
                 <div className="map-pan-layer" style={{ transform: `translate(${mapViewport.x}px, ${mapViewport.y}px) scale(${mapViewport.scale})` }}>{renderTopology(expandedLayout)}</div>
@@ -613,9 +703,9 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
       {isChartExpanded && (
         <div className="chart-modal-backdrop" role="presentation">
           <section className="chart-modal" role="dialog" aria-modal="true" aria-labelledby="wear-history-modal-title">
-            <header className="chart-modal-header"><div><span className="panel-kicker">上行 · {config.title} · {selectedCode}</span><h3 id="wear-history-modal-title">{selectedPoint.from.name}－{selectedPoint.to.name}歷史趨勢</h3></div><button type="button" className="chart-modal-close" onClick={() => setIsChartExpanded(false)} aria-label="關閉放大圖表">×</button></header>
-            <div className="chart-modal-devices"><span style={{ "--series-color": selectedRailSide === "left" ? "#0fa878" : "#e59a14" } as CSSProperties}><i></i><strong>{selectedCode} {sideText[selectedRailSide]}</strong> {selectedReading.wear.toFixed(2)} mm</span><small>單位：mm · 門檻目前為示範設定</small></div>
-            <div className="chart-modal-canvas"><WearHistoryChart reading={selectedReading} code={selectedCode} config={config} expanded /></div>
+            <header className="chart-modal-header"><div><span className="panel-kicker">{directionText[selectedPoint.direction]} · {config.title} · {selectedCode}</span><h3 id="wear-history-modal-title">{selectedPoint.from.name}－{selectedPoint.to.name}歷史趨勢</h3></div><button type="button" className="chart-modal-close" onClick={() => setIsChartExpanded(false)} aria-label="關閉放大圖表">×</button></header>
+            <div className="chart-modal-devices"><span style={{ "--series-color": selectedRailSide === "left" ? "#0fa878" : "#e59a14" } as CSSProperties}><i></i><strong>{selectedDisplayCode} {sideText[selectedRailSide]}</strong> {selectedReading.wear.toFixed(2)} mm</span><small>單位：mm · 門檻目前為示範設定</small></div>
+            <div className="chart-modal-canvas"><WearHistoryChart reading={selectedReading} code={selectedDisplayCode} config={config} expanded /></div>
           </section>
         </div>
       )}

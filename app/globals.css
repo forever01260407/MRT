@@ -230,7 +230,7 @@ button:focus-visible {
 }
 
 .device-track:hover { transform: scaleY(1.35); }
-.device-track.filtered-out { opacity: .12; filter: grayscale(.75); pointer-events: none; }
+.device-track.filtered-out, .fallback-track.filtered-out { opacity: .12; filter: grayscale(.75); pointer-events: none; }
 .device-track.compared { box-shadow: 0 0 0 2px rgba(98, 85, 223, .24), 0 2px 4px rgba(23, 33, 58, .2); }
 .device-track.selected {
   height: 14px;
@@ -731,6 +731,16 @@ button:focus-visible {
 .wear-summary-grid { grid-template-columns: repeat(4, 1fr); }
 .wear-map-actions { grid-template-columns: auto auto; align-items: center; }
 .wear-map-actions .legend { grid-column: 1 / -1; }
+.wear-segment-group { height: 112px; }
+.wear-segment-group::before { inset: 1px -7px; }
+.wear-lane-up-right { top: 5px; }
+.wear-lane-up-left { top: 31px; }
+.wear-lane-down-left { top: 59px; }
+.wear-lane-down-right { top: 85px; }
+.device-track-label.wear-label-up-right,
+.device-track-label.wear-label-up-left { top: -23px; }
+.device-track-label.wear-label-down-left,
+.device-track-label.wear-label-down-right { top: 16px; }
 
 .direction-filter {
   padding: 3px;
@@ -873,6 +883,8 @@ button:focus-visible {
 .wear-history-status.warning { color: #9c6400; background: var(--warning-soft); }
 .wear-history-status.critical { color: #b32643; background: var(--danger-soft); }
 .chart-modal-canvas .wear-history-chart { height: 100%; min-height: 390px; margin-top: 0; }
+.wear-alerts-panel .table-row > strong { color: var(--ink); }
+.wear-alerts-empty { padding: 24px 12px; border-top: 1px solid var(--line); color: var(--muted); text-align: center; font-size: 12px; }
 .wear-map-modal .wear-track { pointer-events: auto; }
 .wear-mobile-list { display: none; }
 
