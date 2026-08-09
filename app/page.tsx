@@ -23,6 +23,7 @@ type Device = {
   history: number[];
   historyDates: string[];
   latestRecord?: LubricationRecord;
+  dataState?: "imported" | "missing";
 };
 
 type Segment = {
@@ -102,6 +103,10 @@ function makeDevice(
   history: number[],
 ): Device {
   return { id, direction, status, value, change, history, historyDates: demoHistoryDates };
+}
+
+function hasDeviceData(device: Device) {
+  return device.dataState !== "missing";
 }
 
 const segments: Segment[] = [
@@ -260,15 +265,26 @@ function applyImportedRecords(sourceSegments: Segment[], records: LubricationRec
     ...segment,
     fallbackUp: "unknown" as RailStatus,
     fallbackDown: "unknown" as RailStatus,
-    devices: segment.devices.flatMap((device) => {
+    devices: segment.devices.map((device) => {
       const deviceRecords = recordsByDevice.get(device.id);
-      if (!deviceRecords?.length) return [];
+      if (!deviceRecords?.length) {
+        return {
+          ...device,
+          status: "unknown" as RailStatus,
+          value: 0,
+          change: 0,
+          history: [],
+          historyDates: [],
+          latestRecord: undefined,
+          dataState: "missing" as const,
+        };
+      }
       const sortedRecords = [...deviceRecords].sort((a, b) => a.measuredAt.localeCompare(b.measuredAt));
       const recentRecords = sortedRecords.slice(-7);
       const latestRecord = sortedRecords[sortedRecords.length - 1];
       const previousRecord = sortedRecords[sortedRecords.length - 2];
       const change = previousRecord ? Number((latestRecord.oilLevel - previousRecord.oilLevel).toFixed(2)) : 0;
-      return [{
+      return {
         ...device,
         status: oilLevelStatus(latestRecord.oilLevel),
         value: latestRecord.oilLevel,
@@ -276,7 +292,8 @@ function applyImportedRecords(sourceSegments: Segment[], records: LubricationRec
         history: recentRecords.map((record) => record.oilLevel),
         historyDates: recentRecords.map((record) => record.measuredAt),
         latestRecord,
-      }];
+        dataState: "imported" as const,
+      };
     }),
   }));
 }
@@ -617,7 +634,7 @@ export default function Home() {
   const comparedDevices = useMemo(
     () => comparedDeviceIds
       .map((id) => selectedSegment.devices.find((device) => device.id === id))
-      .filter((device): device is Device => Boolean(device)),
+      .filter((device): device is Device => Boolean(device) && hasDeviceData(device as Device)),
     [comparedDeviceIds, selectedSegment],
   );
   const selectedSegmentState = segmentStatus(selectedSegment);
@@ -654,7 +671,7 @@ export default function Home() {
       }
       setExcelImport({
         status: "success",
-        message: `已匯入 ${records.length} 筆紀錄，更新 ${importedDeviceIds.size} 台設備。未出現在 Excel 的設備不顯示資料。`,
+        message: `已匯入 ${records.length} 筆紀錄，更新 ${importedDeviceIds.size} 台設備。未出現在 Excel 的設備標示為無資料。`,
         fileName: file.name,
         recordCount: records.length,
         deviceCount: importedDeviceIds.size,
@@ -685,7 +702,9 @@ export default function Home() {
 
   const chooseDefaultDevice = (segment: Segment) => {
     return [...segment.devices].sort((a, b) => (
-      statusPriority[b.status] - statusPriority[a.status] || a.value - b.value
+      Number(hasDeviceData(b)) - Number(hasDeviceData(a))
+      || statusPriority[b.status] - statusPriority[a.status]
+      || a.value - b.value
     ))[0] ?? null;
   };
 
@@ -699,7 +718,7 @@ export default function Home() {
   const selectDevice = (segment: Segment, device: Device) => {
     setSelectedSegmentId(segment.id);
     setSelectedDeviceId(device.id);
-    setComparedDeviceIds([device.id]);
+    setComparedDeviceIds(hasDeviceData(device) ? [device.id] : []);
   };
 
   const locateDeviceOnMap = (segment: Segment, device: Device) => {
@@ -719,12 +738,13 @@ export default function Home() {
       return;
     }
     setSelectedDeviceId(device.id);
-    if (!comparedDeviceIds.includes(device.id)) {
+    if (hasDeviceData(device) && !comparedDeviceIds.includes(device.id)) {
       setComparedDeviceIds([...comparedDeviceIds, device.id]);
     }
   };
 
   const toggleComparedDevice = (device: Device) => {
+    if (!hasDeviceData(device)) return;
     const isCompared = comparedDeviceIds.includes(device.id);
     const nextIds = isCompared
       ? comparedDeviceIds.filter((id) => id !== device.id)
@@ -743,7 +763,10 @@ export default function Home() {
     if (!laneDevices.length) {
       return <span className={`fallback-track ${fallback}`} aria-hidden="true"></span>;
     }
-    return [...laneDevices].reverse().map((device) => (
+    return [...laneDevices].reverse().map((device) => {
+      const hasData = hasDeviceData(device);
+      const readingText = hasData ? `${device.value} L` : "無資料";
+      return (
       <button
         type="button"
         key={device.id}
@@ -752,23 +775,25 @@ export default function Home() {
           event.stopPropagation();
           selectDevice(segment, device);
         }}
-        title={`${device.id}｜${statusText[device.status]}｜${device.value} L`}
-        aria-label={`${device.id}，${statusText[device.status]}，目前 ${device.value} L`}
+        title={`${device.id}｜${hasData ? statusText[device.status] : "無資料"}｜${readingText}`}
+        aria-label={`${device.id}，${hasData ? statusText[device.status] : "無資料"}，${readingText}`}
       >
         <span
           className={`device-track-label label-${direction}`}
           style={{ transform: `translateX(-50%) rotate(${-angle}deg)` }}
         >{device.id}</span>
       </button>
-    ));
+      );
+    });
   };
 
   const renderDeviceCards = (laneDevices: Device[]) => laneDevices.map((device) => {
     const isFocused = selectedDeviceId === device.id;
     const isCompared = comparedDeviceIds.includes(device.id);
+    const hasData = hasDeviceData(device);
     return (
       <div
-        className={`device-card ${device.status} ${isFocused ? "selected" : ""} ${isCompared ? "compare-active" : ""}`}
+        className={`device-card ${device.status} ${hasData ? "" : "no-data"} ${isFocused ? "selected" : ""} ${isCompared ? "compare-active" : ""}`}
         key={device.id}
       >
         <button
@@ -778,14 +803,15 @@ export default function Home() {
           aria-label={`查看 ${device.id} 詳細資料`}
         >
           <span><i></i>{device.id}</span>
-          <strong>{device.value} L</strong>
-          <small>{formatChange(device.change)}</small>
+          <strong>{hasData ? `${device.value} L` : "無資料"}</strong>
+          <small>{hasData ? formatChange(device.change) : "尚未匯入"}</small>
         </button>
         <button
           type="button"
           className={`compare-toggle ${isCompared ? "checked" : ""}`}
           onClick={() => toggleComparedDevice(device)}
           aria-pressed={isCompared}
+          disabled={!hasData}
           aria-label={`${isCompared ? "取消" : "加入"} ${device.id} 趨勢比較`}
           title={`${isCompared ? "取消" : "加入"}圖表比較`}
         >
@@ -1018,11 +1044,11 @@ export default function Home() {
                     <span className="panel-kicker">目前查看設備</span>
                     <h4>{selectedDevice.id}</h4>
                   </div>
-                  <span className={`status-pill ${selectedDevice.status}`}>{statusText[selectedDevice.status]}</span>
+                  <span className={`status-pill ${selectedDevice.status}`}>{hasDeviceData(selectedDevice) ? statusText[selectedDevice.status] : "無資料"}</span>
                 </div>
                 <div className="device-reading-grid">
-                  <div><span>目前油量</span><strong>{selectedDevice.value} L</strong></div>
-                  <div><span>相比前次</span><strong className={selectedDevice.change < 0 ? "danger-text" : ""}>{formatChange(selectedDevice.change)}</strong></div>
+                  <div><span>目前油量</span><strong>{hasDeviceData(selectedDevice) ? `${selectedDevice.value} L` : "無資料"}</strong></div>
+                  <div><span>相比前次</span><strong className={selectedDevice.change < 0 ? "danger-text" : ""}>{hasDeviceData(selectedDevice) ? formatChange(selectedDevice.change) : "—"}</strong></div>
                   <div><span>所在軌道</span><strong>{selectedDevice.direction === "up" ? "MOK 上行" : "LB 下行"}</strong></div>
                   {selectedDevice.latestRecord ? (
                     <>
@@ -1041,7 +1067,7 @@ export default function Home() {
                   ))}</div>
                 </div>
                 <div className="chart-heading">
-                  <strong>{comparedDevices.length > 1 ? `${comparedDevices.length} 台設備趨勢比較` : `${selectedDevice.id} 最近七次油量趨勢`}</strong>
+                  <strong>{hasDeviceData(selectedDevice) ? (comparedDevices.length > 1 ? `${comparedDevices.length} 台設備趨勢比較` : `${selectedDevice.id} 最近七次油量趨勢`) : `${selectedDevice.id} 尚無量測歷程`}</strong>
                   <div className="chart-heading-actions">
                     <span>單位：L</span>
                     <button
@@ -1049,15 +1075,20 @@ export default function Home() {
                       className="expand-chart-button"
                       ref={expandChartButtonRef}
                       onClick={() => setIsChartExpanded(true)}
+                      disabled={!hasDeviceData(selectedDevice)}
                       aria-haspopup="dialog"
                       aria-label="放大油量趨勢圖"
                     ><i aria-hidden="true">⛶</i>放大</button>
                   </div>
                 </div>
-                <HistoryChart devices={comparedDevices} />
+                {hasDeviceData(selectedDevice) ? (
+                  <HistoryChart devices={comparedDevices} />
+                ) : (
+                  <div className="chart-empty-state"><strong>無資料</strong><span>這份 Excel 尚未提供 {selectedDevice.id} 的量測紀錄。</span></div>
+                )}
                 <div className={`detail-note ${selectedDevice.status}`}>
                   <strong>維修提示</strong>
-                  <p>{selectedDevice.status === "critical" ? "請優先核對現場油量、噴塗週期與最近一次補充紀錄。" : selectedDevice.status === "warning" ? "目前接近警戒值，請持續觀察下降速度並安排複查。" : "設備目前正常，持續依既定週期監測。"}</p>
+                  <p>{!hasDeviceData(selectedDevice) ? "目前沒有量測資料，請確認 Excel 是否已填入這台設備。" : selectedDevice.status === "critical" ? "請優先核對現場油量、噴塗週期與最近一次補充紀錄。" : selectedDevice.status === "warning" ? "目前接近警戒值，請持續觀察下降速度並安排複查。" : "設備目前正常，持續依既定週期監測。"}</p>
                 </div>
               </section>
             ) : (
@@ -1138,7 +1169,7 @@ export default function Home() {
           </div>
         ) : null}
 
-        {isChartExpanded && selectedDevice ? (
+        {isChartExpanded && selectedDevice && hasDeviceData(selectedDevice) ? (
           <div
             className="chart-modal-backdrop"
             onMouseDown={(event) => {
@@ -1169,7 +1200,7 @@ export default function Home() {
               <div className="chart-modal-devices" aria-label="目前顯示設備">
                 {comparedDevices.map((device, index) => (
                   <span key={device.id} style={{ "--series-color": comparisonColors[index % comparisonColors.length] } as CSSProperties}>
-                    <i></i><strong>{device.id}</strong>{device.value} L
+                    <i></i><strong>{device.id}</strong>{hasDeviceData(device) ? `${device.value} L` : "無資料"}
                   </span>
                 ))}
                 <small>單位：L</small>

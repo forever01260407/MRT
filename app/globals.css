@@ -487,10 +487,12 @@ button:focus-visible {
 .compare-toggle { width: 19px; height: 19px; padding: 0; display: grid; place-items: center; border: 1.5px solid #b9c2cf; border-radius: 5px; color: #fff; background: #fff; font-size: 12px; font-weight: 900; line-height: 1; cursor: pointer; position: absolute; top: 6px; right: 6px; z-index: 2; }
 .compare-toggle:hover { border-color: var(--violet); }
 .compare-toggle.checked { border-color: var(--violet); background: var(--violet); box-shadow: 0 2px 6px rgba(98, 85, 223, .28); }
+.compare-toggle:disabled { border-color: #d7dde6; color: #aab3c0; background: #eef1f5; cursor: not-allowed; opacity: .75; }
 .device-card.normal { background: linear-gradient(145deg, #fff 40%, var(--success-soft)); }
 .device-card.warning { background: linear-gradient(145deg, #fff 40%, var(--warning-soft)); }
 .device-card.critical { background: linear-gradient(145deg, #fff 40%, var(--danger-soft)); }
 .device-card.unknown { background: linear-gradient(145deg, #fff 40%, var(--unknown-soft)); }
+.device-card.no-data .device-card-main > strong { color: #687487; }
 .device-card.normal .device-card-main > span i { background: var(--success); }
 .device-card.warning .device-card-main > span i { background: var(--warning); }
 .device-card.critical .device-card-main > span i { background: var(--danger); }
