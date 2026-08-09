@@ -280,7 +280,6 @@ function applyImportedRecords(sourceSegments: Segment[], records: LubricationRec
         };
       }
       const sortedRecords = [...deviceRecords].sort((a, b) => a.measuredAt.localeCompare(b.measuredAt));
-      const recentRecords = sortedRecords.slice(-7);
       const latestRecord = sortedRecords[sortedRecords.length - 1];
       const previousRecord = sortedRecords[sortedRecords.length - 2];
       const change = previousRecord ? Number((latestRecord.oilLevel - previousRecord.oilLevel).toFixed(2)) : 0;
@@ -289,8 +288,8 @@ function applyImportedRecords(sourceSegments: Segment[], records: LubricationRec
         status: oilLevelStatus(latestRecord.oilLevel),
         value: latestRecord.oilLevel,
         change,
-        history: recentRecords.map((record) => record.oilLevel),
-        historyDates: recentRecords.map((record) => record.measuredAt),
+        history: sortedRecords.map((record) => record.oilLevel),
+        historyDates: sortedRecords.map((record) => record.measuredAt),
         latestRecord,
         dataState: "imported" as const,
       };
@@ -374,6 +373,9 @@ function HistoryChart({ devices, expanded = false }: { devices: Device[]; expand
     let disposed = false;
     let chart: { dispose: () => void; resize: () => void } | undefined;
     const axisDates = Array.from(new Set(devices.flatMap((device) => device.historyDates))).sort();
+    const initialStartIndex = Math.max(0, axisDates.length - 7);
+    const initialStartValue = axisDates[initialStartIndex];
+    const initialEndValue = axisDates.at(-1);
     const highestValue = Math.max(80, ...devices.flatMap((device) => device.history));
     const yAxisMaximum = highestValue <= 100 ? Math.ceil(highestValue / 20) * 20 : Math.ceil(highestValue / 100) * 100;
 
@@ -397,8 +399,37 @@ function HistoryChart({ devices, expanded = false }: { devices: Device[]; expand
           left: expanded ? 66 : 43,
           right: expanded ? 30 : 12,
           top: devices.length > 1 ? (expanded ? 66 : 48) : (expanded ? 52 : 36),
-          bottom: expanded ? 48 : 30,
+          bottom: expanded ? 86 : 66,
         },
+        dataZoom: axisDates.length > 1 ? [
+          {
+            type: "inside",
+            xAxisIndex: 0,
+            startValue: initialStartValue,
+            endValue: initialEndValue,
+            zoomOnMouseWheel: "ctrl",
+            moveOnMouseMove: true,
+            moveOnMouseWheel: false,
+            preventDefaultMouseMove: true,
+            minValueSpan: 1,
+          },
+          {
+            type: "slider",
+            xAxisIndex: 0,
+            startValue: initialStartValue,
+            endValue: initialEndValue,
+            bottom: expanded ? 12 : 8,
+            height: expanded ? 26 : 20,
+            brushSelect: false,
+            showDetail: false,
+            borderColor: styles.getPropertyValue("--line").trim(),
+            backgroundColor: "rgba(244, 246, 250, .86)",
+            fillerColor: "rgba(98, 85, 223, .18)",
+            handleStyle: { color: styles.getPropertyValue("--violet").trim(), borderColor: "#ffffff" },
+            moveHandleStyle: { color: styles.getPropertyValue("--violet").trim() },
+            minValueSpan: 1,
+          },
+        ] : [],
         tooltip: { trigger: "axis", valueFormatter: (value: unknown) => `${value} L` },
         xAxis: {
           type: "category",
@@ -1067,9 +1098,9 @@ export default function Home() {
                   ))}</div>
                 </div>
                 <div className="chart-heading">
-                  <strong>{hasDeviceData(selectedDevice) ? (comparedDevices.length > 1 ? `${comparedDevices.length} 台設備趨勢比較` : `${selectedDevice.id} 最近七次油量趨勢`) : `${selectedDevice.id} 尚無量測歷程`}</strong>
+                  <strong>{hasDeviceData(selectedDevice) ? (comparedDevices.length > 1 ? `${comparedDevices.length} 台設備趨勢比較` : `${selectedDevice.id} 油量歷程`) : `${selectedDevice.id} 尚無量測歷程`}</strong>
                   <div className="chart-heading-actions">
-                    <span>單位：L</span>
+                    <span>拖曳左右移動 · Ctrl＋滾輪縮放 · 單位：L</span>
                     <button
                       type="button"
                       className="expand-chart-button"
@@ -1186,7 +1217,7 @@ export default function Home() {
                 <div>
                   <span className="panel-kicker">{selectedSegment.location}</span>
                   <h3 id="expanded-chart-title">
-                    {comparedDevices.length > 1 ? `${comparedDevices.length} 台設備趨勢比較` : `${selectedDevice.id} 最近七次油量趨勢`}
+                    {comparedDevices.length > 1 ? `${comparedDevices.length} 台設備趨勢比較` : `${selectedDevice.id} 完整油量歷程`}
                   </h3>
                 </div>
                 <button
@@ -1203,7 +1234,7 @@ export default function Home() {
                     <i></i><strong>{device.id}</strong>{hasDeviceData(device) ? `${device.value} L` : "無資料"}
                   </span>
                 ))}
-                <small>單位：L</small>
+                <small>拖曳圖表左右移動 · Ctrl＋滾輪縮放 · 下方滑桿調整範圍 · 單位：L</small>
               </div>
               <div className="chart-modal-canvas">
                 <HistoryChart devices={comparedDevices} expanded />
