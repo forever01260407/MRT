@@ -97,7 +97,7 @@ export function parseLubricationRows(rows: unknown[][]): LubricationRecord[] {
     const refillAmount = normalizeNumber(row[headerIndexes["補油量（L）"]]);
 
     if (!deviceId) errors.push(`第 ${rowNumber} 列：設備編號必須是 MOK-01～MOK-10 或 LB-01～LB-10。`);
-    if (!measuredAt) errors.push(`第 ${rowNumber} 列：量測時間格式錯誤，請使用 yyyy-mm-dd hh:mm。`);
+    if (!measuredAt) errors.push(`第 ${rowNumber} 列：量測日期格式錯誤，請輸入有效日期（例如 8月5日）。`);
     if (oilLevel === null || oilLevel < 0) errors.push(`第 ${rowNumber} 列：油量必須是大於或等於 0 的數字。`);
     if (!inspector) errors.push(`第 ${rowNumber} 列：檢修人員不可空白。`);
     if (recordTypeText !== "量測" && recordTypeText !== "補油") errors.push(`第 ${rowNumber} 列：紀錄類型只能是「量測」或「補油」。`);
@@ -132,6 +132,6 @@ export async function readLubricationWorkbook(file: File) {
   if (!file.name.toLowerCase().endsWith(".xlsx")) {
     throw new LubricationImportError(["目前只支援 .xlsx 檔案，請下載網站提供的範本填寫。"]);
   }
-  const rows = await readSheet(file);
+  const rows = await readSheet(file, { dateFormat: 'm"月"d"日"' });
   return parseLubricationRows(rows as unknown[][]);
 }

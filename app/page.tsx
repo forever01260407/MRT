@@ -238,7 +238,9 @@ function oilLevelStatus(value: number): RailStatus {
 }
 
 function formatMeasurementTime(value: string) {
-  return value.replace("T", " ").slice(0, 16);
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
+  return new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric" }).format(date);
 }
 
 function formatChartDate(value: string) {
