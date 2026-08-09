@@ -258,15 +258,17 @@ function applyImportedRecords(sourceSegments: Segment[], records: LubricationRec
 
   return sourceSegments.map((segment) => ({
     ...segment,
-    devices: segment.devices.map((device) => {
+    fallbackUp: "unknown" as RailStatus,
+    fallbackDown: "unknown" as RailStatus,
+    devices: segment.devices.flatMap((device) => {
       const deviceRecords = recordsByDevice.get(device.id);
-      if (!deviceRecords?.length) return device;
+      if (!deviceRecords?.length) return [];
       const sortedRecords = [...deviceRecords].sort((a, b) => a.measuredAt.localeCompare(b.measuredAt));
       const recentRecords = sortedRecords.slice(-7);
       const latestRecord = sortedRecords[sortedRecords.length - 1];
       const previousRecord = sortedRecords[sortedRecords.length - 2];
       const change = previousRecord ? Number((latestRecord.oilLevel - previousRecord.oilLevel).toFixed(2)) : 0;
-      return {
+      return [{
         ...device,
         status: oilLevelStatus(latestRecord.oilLevel),
         value: latestRecord.oilLevel,
@@ -274,7 +276,7 @@ function applyImportedRecords(sourceSegments: Segment[], records: LubricationRec
         history: recentRecords.map((record) => record.oilLevel),
         historyDates: recentRecords.map((record) => record.measuredAt),
         latestRecord,
-      };
+      }];
     }),
   }));
 }
@@ -652,7 +654,7 @@ export default function Home() {
       }
       setExcelImport({
         status: "success",
-        message: `已匯入 ${records.length} 筆紀錄，更新 ${importedDeviceIds.size} 台設備。未出現在 Excel 的設備保留示範資料。`,
+        message: `已匯入 ${records.length} 筆紀錄，更新 ${importedDeviceIds.size} 台設備。未出現在 Excel 的設備不顯示資料。`,
         fileName: file.name,
         recordCount: records.length,
         deviceCount: importedDeviceIds.size,
