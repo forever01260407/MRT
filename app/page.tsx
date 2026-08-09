@@ -430,7 +430,10 @@ function HistoryChart({ devices, expanded = false }: { devices: Device[]; expand
             minValueSpan: 1,
           },
         ] : [],
-        tooltip: { trigger: "axis", valueFormatter: (value: unknown) => `${value} L` },
+        tooltip: {
+          trigger: "axis",
+          valueFormatter: (value: unknown) => typeof value === "number" ? `${value} L` : "無資料",
+        },
         xAxis: {
           type: "category",
           boundaryGap: false,
@@ -452,7 +455,7 @@ function HistoryChart({ devices, expanded = false }: { devices: Device[]; expand
           return {
             name: device.id,
             type: "line",
-            connectNulls: false,
+            connectNulls: true,
             smooth: 0.32,
             symbol: device.direction === "up" ? "circle" : "diamond",
             symbolSize: expanded ? 11 : 8,

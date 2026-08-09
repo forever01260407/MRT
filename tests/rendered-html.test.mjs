@@ -46,6 +46,8 @@ test("keeps complete imported history and enables chart navigation", async () =>
   assert.match(page, /type:\s*"slider"/);
   assert.match(page, /zoomOnMouseWheel:\s*"ctrl"/);
   assert.match(page, /moveOnMouseMove:\s*true/);
+  assert.match(page, /connectNulls:\s*true/);
+  assert.match(page, /typeof value === "number"/);
   assert.match(page, /拖曳圖表左右移動/);
   assert.match(page, /下方滑桿調整範圍/);
 });
