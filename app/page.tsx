@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import { calculateConsumptionBaseline, forecastOilLevel } from "./lib/consumptionBaseline";
 import { LubricationImportError, readLubricationWorkbook } from "./lib/lubricationExcel";
 import type { LubricationRecord } from "./lib/lubricationExcel";
 
@@ -22,6 +23,7 @@ type Device = {
   change: number;
   history: number[];
   historyDates: string[];
+  records?: LubricationRecord[];
   latestRecord?: LubricationRecord;
   dataState?: "imported" | "missing";
 };
@@ -94,6 +96,33 @@ const demoHistoryDates = [
   "2026-07-24T08:00:00",
 ];
 
+const mok3DemoHistoryDates = [
+  "2026-07-01T08:00:00",
+  "2026-07-02T08:00:00",
+  "2026-07-04T08:00:00",
+  "2026-07-06T08:00:00",
+  "2026-07-08T08:00:00",
+  "2026-07-09T08:00:00",
+  "2026-07-10T08:00:00",
+  "2026-07-11T08:00:00",
+  "2026-07-12T08:00:00",
+  "2026-07-13T08:00:00",
+  "2026-07-14T08:00:00",
+  "2026-07-17T08:00:00",
+  "2026-07-18T08:00:00",
+  "2026-07-19T08:00:00",
+  "2026-07-20T08:00:00",
+  "2026-07-22T08:00:00",
+  "2026-07-23T08:00:00",
+];
+
+const mok3DemoHistory = [
+  70, 68, 64.3, 60.1,
+  76, 73.9, 72, 70.1,
+  80, 78.1, 76, 70.2, 68.4,
+  80, 78.1, 74.2, 72.3,
+];
+
 function makeDevice(
   id: string,
   direction: Direction,
@@ -101,8 +130,25 @@ function makeDevice(
   value: number,
   change: number,
   history: number[],
+  historyDates: string[] = demoHistoryDates,
+  refillIndexes: number[] = [],
 ): Device {
-  return { id, direction, status, value, change, history, historyDates: demoHistoryDates };
+  const records: LubricationRecord[] = history.map((oilLevel, index) => {
+    const isRefill = refillIndexes.includes(index);
+    const previousLevel = history[index - 1];
+    return {
+      deviceId: id,
+      measuredAt: historyDates[index],
+      oilLevel,
+      inspector: "示範資料",
+      recordType: isRefill ? "補油" : "量測",
+      refillAmount: isRefill && previousLevel !== undefined
+        ? Number(Math.max(0, oilLevel - previousLevel).toFixed(2))
+        : null,
+    };
+  });
+
+  return { id, direction, status, value, change, history, historyDates, records };
 }
 
 function hasDeviceData(device: Device) {
@@ -124,7 +170,7 @@ const segments: Segment[] = [
     id: "Y10-Y11", from: 4, to: 5, location: "景安－中和", fallbackUp: "unknown", fallbackDown: "unknown",
     devices: [
       makeDevice("MOK2", "up", "normal", 51, -1, [63, 61, 59, 58, 56, 52, 51]),
-      makeDevice("MOK3", "up", "critical", 14, -7, [61, 55, 49, 41, 32, 21, 14]),
+      makeDevice("MOK3", "up", "normal", 72.3, -1.9, mok3DemoHistory, mok3DemoHistoryDates, [4, 8, 13]),
       makeDevice("MOK4", "up", "critical", 18, -3, [54, 49, 43, 36, 29, 21, 18]),
       makeDevice("MOK5", "up", "critical", 17, 0, [68, 59, 52, 43, 35, 27, 17]),
       makeDevice("LB2", "down", "normal", 58, 2, [49, 50, 52, 53, 55, 56, 58]),
@@ -253,6 +299,45 @@ function formatChartDate(value: string) {
   return compact.slice(5, 10).replace("-", "/") + (compact.slice(11, 16) === "00:00" ? "" : ` ${compact.slice(11, 16)}`);
 }
 
+function formatBaselineDate(value: string) {
+  return value.slice(5, 10).replace("-", "/");
+}
+
+function formatBaselineDays(days: number) {
+  return Number.isInteger(days) ? String(days) : days.toFixed(1);
+}
+
+function todayInTaipei() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function calendarDaysBetween(startDate: string, endDate: string) {
+  const start = Date.parse(`${startDate.slice(0, 10)}T00:00:00Z`);
+  const end = Date.parse(`${endDate.slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.round((end - start) / (24 * 60 * 60 * 1000));
+}
+
+function baselineRecordsForDevice(device: Device | null) {
+  if (!device) return [];
+  if (device.records) return device.records;
+  return device.history.map<LubricationRecord>((oilLevel, index) => ({
+    deviceId: device.id,
+    measuredAt: device.historyDates[index],
+    oilLevel,
+    inspector: "歷史資料",
+    recordType: "量測",
+    refillAmount: null,
+  })).filter((record) => Boolean(record.measuredAt));
+}
+
 function applyImportedRecords(sourceSegments: Segment[], records: LubricationRecord[]) {
   const recordsByDevice = new Map<string, LubricationRecord[]>();
   records.forEach((record) => {
@@ -275,6 +360,7 @@ function applyImportedRecords(sourceSegments: Segment[], records: LubricationRec
           change: 0,
           history: [],
           historyDates: [],
+          records: [],
           latestRecord: undefined,
           dataState: "missing" as const,
         };
@@ -290,6 +376,7 @@ function applyImportedRecords(sourceSegments: Segment[], records: LubricationRec
         change,
         history: sortedRecords.map((record) => record.oilLevel),
         historyDates: sortedRecords.map((record) => record.measuredAt),
+        records: sortedRecords,
         latestRecord,
         dataState: "imported" as const,
       };
@@ -504,12 +591,13 @@ export default function Home() {
   const [mapSize, setMapSize] = useState({ width: 1000, height: 680 });
   const [expandedMapSize, setExpandedMapSize] = useState({ width: 1400, height: 760 });
   const [selectedSegmentId, setSelectedSegmentId] = useState("Y10-Y11");
-  const [selectedDeviceId, setSelectedDeviceId] = useState("LB4");
-  const [comparedDeviceIds, setComparedDeviceIds] = useState<string[]>(["LB4"]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("MOK3");
+  const [comparedDeviceIds, setComparedDeviceIds] = useState<string[]>(["MOK3"]);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [isMapDragging, setIsMapDragging] = useState(false);
   const [mapViewport, setMapViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [isChartExpanded, setIsChartExpanded] = useState(false);
+  const [forecastDate, setForecastDate] = useState(todayInTaipei);
   const [activeSegments, setActiveSegments] = useState<Segment[]>(segments);
   const [excelImport, setExcelImport] = useState<ExcelImportState>({
     status: "idle",
@@ -665,6 +753,38 @@ export default function Home() {
     () => selectedSegment.devices.find((device) => device.id === selectedDeviceId) ?? null,
     [selectedDeviceId, selectedSegment],
   );
+  const selectedConsumptionBaseline = useMemo(
+    () => calculateConsumptionBaseline(baselineRecordsForDevice(selectedDevice)),
+    [selectedDevice],
+  );
+  const forecastDays = 2;
+  const expectedOilLevel = selectedDevice
+    ? forecastOilLevel(selectedDevice.value, selectedConsumptionBaseline.dailyConsumptionBaseline, forecastDays)
+    : null;
+  const visibleBaselineSegments = selectedConsumptionBaseline.segments.slice(-3);
+  const visibleBaselineStartIndex = selectedConsumptionBaseline.segments.length - visibleBaselineSegments.length;
+  const latestBaselineRecord = selectedConsumptionBaseline.latestRecord;
+  const forecastElapsedDays = latestBaselineRecord
+    ? calendarDaysBetween(latestBaselineRecord.measuredAt, forecastDate)
+    : null;
+  const datedExpectedOilLevel = selectedDevice
+    && hasDeviceData(selectedDevice)
+    && forecastElapsedDays !== null
+    && forecastElapsedDays >= 0
+    ? forecastOilLevel(
+      latestBaselineRecord?.oilLevel ?? selectedDevice.value,
+      selectedConsumptionBaseline.dailyConsumptionBaseline,
+      forecastElapsedDays,
+    )
+    : null;
+  const forecastDateState = !latestBaselineRecord || selectedConsumptionBaseline.dailyConsumptionBaseline === null
+    ? "insufficient"
+    : forecastElapsedDays === null || forecastElapsedDays < 0
+      ? "invalid"
+      : "ready";
+  const datedForecastStatus = forecastDateState === "ready" && datedExpectedOilLevel !== null
+    ? oilLevelStatus(datedExpectedOilLevel)
+    : null;
   const comparedDevices = useMemo(
     () => comparedDeviceIds
       .map((id) => selectedSegment.devices.find((device) => device.id === id))
@@ -729,8 +849,8 @@ export default function Home() {
   const resetExcelImport = () => {
     setActiveSegments(segments);
     setSelectedSegmentId("Y10-Y11");
-    setSelectedDeviceId("LB4");
-    setComparedDeviceIds(["LB4"]);
+    setSelectedDeviceId("MOK3");
+    setComparedDeviceIds(["MOK3"]);
     setExcelImport({ status: "idle", message: "已回復網站內建示範資料。" });
   };
 
@@ -1069,6 +1189,96 @@ export default function Home() {
               ) : (
                 <div className="no-device-message"><strong>此區間尚無固定設備資料</strong><span>無資料不能判定為正常。</span></div>
               )}
+
+              {selectedDevice ? (
+                <article className="consumption-baseline-card" aria-labelledby="consumption-baseline-title">
+                  <header className="consumption-baseline-header">
+                    <div>
+                      <span className="panel-kicker">CONSUMPTION BASELINE</span>
+                      <h5 id="consumption-baseline-title">每日平均耗油量</h5>
+                    </div>
+                    <span className={`consumption-baseline-badge ${selectedConsumptionBaseline.dailyConsumptionBaseline !== null ? "ready" : "empty"}`}>
+                      {selectedConsumptionBaseline.dailyConsumptionBaseline !== null
+                        ? `${selectedConsumptionBaseline.segments.length} 個完整區間`
+                        : "資料不足"}
+                    </span>
+                  </header>
+
+                  <div className="consumption-baseline-summary">
+                    <div className="consumption-baseline-metric primary">
+                      <span>正式 baseline</span>
+                      <strong>
+                        {selectedConsumptionBaseline.dailyConsumptionBaseline !== null
+                          ? selectedConsumptionBaseline.dailyConsumptionBaseline.toFixed(2)
+                          : "—"} <small>L／日</small>
+                      </strong>
+                      <small>
+                        {selectedConsumptionBaseline.dailyConsumptionBaseline !== null
+                          ? `總權重 ${formatBaselineDays(selectedConsumptionBaseline.totalCommittedDays)} 天`
+                          : "等待完整下降區間"}
+                      </small>
+                    </div>
+
+                    <div className="consumption-baseline-metric forecast">
+                      <span>{forecastDays} 天後預估油量</span>
+                      <strong>{expectedOilLevel !== null ? expectedOilLevel.toFixed(1) : "—"} <small>L</small></strong>
+                      <small>
+                        {selectedConsumptionBaseline.dailyConsumptionBaseline !== null && hasDeviceData(selectedDevice)
+                          ? `${selectedDevice.value.toFixed(1)} − ${selectedConsumptionBaseline.dailyConsumptionBaseline.toFixed(2)} × ${forecastDays}`
+                          : "建立 baseline 後計算"}
+                      </small>
+                    </div>
+                  </div>
+
+                  {selectedConsumptionBaseline.provisionalSegment ? (
+                    <div className="consumption-baseline-provisional">
+                      <div>
+                        <span>進行中區間・尚未納入</span>
+                        <small>
+                          {formatBaselineDate(selectedConsumptionBaseline.provisionalSegment.startDate)} → {formatBaselineDate(selectedConsumptionBaseline.provisionalSegment.endDate)}
+                        </small>
+                      </div>
+                      <strong>{selectedConsumptionBaseline.provisionalSegment.dailyRate.toFixed(2)} L／日</strong>
+                    </div>
+                  ) : null}
+
+                  <div className="consumption-baseline-source-heading">
+                    <strong>Baseline 來源區間</strong>
+                    <small>{visibleBaselineSegments.length ? `最近 ${visibleBaselineSegments.length} 段` : "尚未建立"}</small>
+                  </div>
+
+                  {visibleBaselineSegments.length ? (
+                    <div className="consumption-baseline-sources">
+                      {visibleBaselineSegments.map((segment, index) => (
+                        <article className="consumption-baseline-source" key={`${segment.startDate}-${segment.endDate}`}>
+                          <div className="consumption-baseline-source-title">
+                            <strong>區間 {visibleBaselineStartIndex + index + 1}</strong>
+                            <span>{formatBaselineDate(segment.startDate)} → {formatBaselineDate(segment.endDate)}</span>
+                          </div>
+                          <strong className="consumption-baseline-source-rate">
+                            {segment.dailyRate.toFixed(2)} <small>L／日</small>
+                          </strong>
+                          <div className="consumption-baseline-source-meta">
+                            <span>{segment.startLevel.toFixed(1)} → {segment.endLevel.toFixed(1)} L</span>
+                            <span>耗油 {segment.consumption.toFixed(1)} L</span>
+                            <span className="weight">權重 {formatBaselineDays(segment.weight)} 天</span>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="consumption-baseline-empty">
+                      {selectedConsumptionBaseline.sourceRecordCount < 2
+                        ? "至少需要兩筆量測，並在補油後完成一段下降歷程。"
+                        : "目前只有進行中的下降區間；遇到補油或明顯上升後才會正式結算。"}
+                    </div>
+                  )}
+
+                  <footer className="consumption-baseline-rule">
+                    補油事件優先；無事件時，單次上升超過 1.0 L 才切分區間。
+                  </footer>
+                </article>
+              ) : null}
             </section>
 
             {selectedDevice ? (
@@ -1124,6 +1334,44 @@ export default function Home() {
                   <strong>維修提示</strong>
                   <p>{!hasDeviceData(selectedDevice) ? "目前沒有量測資料，請確認 Excel 是否已填入這台設備。" : selectedDevice.status === "critical" ? "請優先核對現場油量、噴塗週期與最近一次補充紀錄。" : selectedDevice.status === "warning" ? "目前接近警戒值，請持續觀察下降速度並安排複查。" : "設備目前正常，持續依既定週期監測。"}</p>
                 </div>
+                <section className={`dated-forecast-card ${forecastDateState}`} aria-labelledby="dated-forecast-title">
+                  <div className="dated-forecast-heading">
+                    <div>
+                      <span className="panel-kicker">DATE-BASED FORECAST</span>
+                      <h5 id="dated-forecast-title">指定日期油量預估</h5>
+                    </div>
+                    <button type="button" onClick={() => setForecastDate(todayInTaipei())}>NOW</button>
+                  </div>
+                  <label className="dated-forecast-input">
+                    <span>預估日期</span>
+                    <input
+                      type="date"
+                      value={forecastDate}
+                      onChange={(event) => setForecastDate(event.target.value)}
+                      aria-describedby="dated-forecast-description"
+                    />
+                  </label>
+                  <div className={`dated-forecast-result ${datedForecastStatus ?? ""}`} aria-live="polite">
+                    <div className="dated-forecast-result-heading">
+                      <span>系統預估油量</span>
+                      {datedForecastStatus ? <em>{statusText[datedForecastStatus]}</em> : null}
+                    </div>
+                    <strong>
+                      {forecastDateState === "ready" && datedExpectedOilLevel !== null
+                        ? `${datedExpectedOilLevel.toFixed(1)} L`
+                        : forecastDateState === "invalid"
+                          ? "日期不適用"
+                          : "資料不足"}
+                    </strong>
+                    <small id="dated-forecast-description">
+                      {forecastDateState === "ready" && datedExpectedOilLevel !== null && latestBaselineRecord
+                        ? `以 ${formatMeasurementTime(latestBaselineRecord.measuredAt)} 的 ${latestBaselineRecord.oilLevel.toFixed(1)} L，經過 ${forecastElapsedDays} 天，按 ${selectedConsumptionBaseline.dailyConsumptionBaseline?.toFixed(2)} L／日推估。`
+                        : forecastDateState === "invalid" && latestBaselineRecord
+                          ? `請選擇 ${latestBaselineRecord.measuredAt.slice(0, 10)} 或之後的日期。`
+                          : "尚未建立完整的歷史消耗區間，無法產生預估值。"}
+                    </small>
+                  </div>
+                </section>
               </section>
             ) : (
               <div className="chart-empty-state"><strong>尚未選取設備</strong><span>請點擊地圖上的 MOK／LB 小線段。</span></div>

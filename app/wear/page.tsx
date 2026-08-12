@@ -126,22 +126,22 @@ const wearModeConfig = {
   tread: {
     title: "正面軌道總覽",
     englishTitle: "TREAD WEAR OVERVIEW",
-    measurement: "踏面磨耗（B點）",
-    warning: 2.4,
-    critical: 3,
-    scaleMax: 4,
+    measurement: "踏面磨耗（頂部）",
+    warning: 15.5,
+    critical: 17,
+    scaleMax: 20,
   },
   side: {
     title: "側面軌道總覽",
     englishTitle: "GAUGE WEAR OVERVIEW",
-    measurement: "內緣磨耗（A點）",
-    warning: 5.5,
-    critical: 7,
-    scaleMax: 9,
+    measurement: "側向磨耗（側邊）",
+    warning: 6.5,
+    critical: 8,
+    scaleMax: 10,
   },
 } as const;
 
-const statusText: Record<RailStatus, string> = { normal: "正常", warning: "注意", critical: "需處理" };
+const statusText: Record<RailStatus, string> = { normal: "正常", warning: "管理值", critical: "維修值" };
 const sideText: Record<RailSide, string> = { left: "左軌", right: "右軌" };
 const directionText: Record<Direction, string> = { up: "上行", down: "下行" };
 const statusPriority: Record<RailStatus, number> = { normal: 1, warning: 2, critical: 3 };
@@ -315,8 +315,8 @@ function WearHistoryChart({ reading, code, config, expanded = false }: {
             silent: true,
             symbol: "none",
             data: [
-              { yAxis: config.warning, lineStyle: { color: styles.getPropertyValue("--warning").trim(), type: "dashed" }, label: { formatter: `示範注意 ${config.warning} mm`, color: styles.getPropertyValue("--warning").trim() } },
-              { yAxis: config.critical, lineStyle: { color: styles.getPropertyValue("--danger").trim(), type: "dashed" }, label: { formatter: `示範警戒 ${config.critical} mm`, color: styles.getPropertyValue("--danger").trim() } },
+              { yAxis: config.warning, lineStyle: { color: styles.getPropertyValue("--warning").trim(), type: "dashed" }, label: { formatter: `管理值 ${config.warning} mm`, color: styles.getPropertyValue("--warning").trim() } },
+              { yAxis: config.critical, lineStyle: { color: styles.getPropertyValue("--danger").trim(), type: "dashed" }, label: { formatter: `維修值 ${config.critical} mm`, color: styles.getPropertyValue("--danger").trim() } },
             ],
           },
         }],
@@ -453,7 +453,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
         const renderLane = (direction: Direction, side: RailSide) => {
           const segmentPoints = monitorPoints
             .filter((point) => point.segmentId === segment.id && point.direction === direction)
-            .sort((a, b) => direction === "up" ? b.number - a.number : a.number - b.number);
+            .sort((a, b) => b.number - a.number);
           const filteredOut = directionFilter !== "all" && directionFilter !== direction;
           if (!segmentPoints.length) return <span className={`fallback-track unknown ${filteredOut ? "filtered-out" : ""}`} aria-hidden="true"></span>;
           return segmentPoints.map((point) => {
@@ -515,7 +515,25 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
         );
       })}
 
-      <div className="depot-marker"><span>南機廠</span><small>磨損巡檢基準點</small></div>
+      <div className="wear-direction-end-labels" aria-label="路線兩端上行與下行方向提示">
+          <span
+            className="wear-direction-end-label terminal-y19 down"
+            style={{ left: `${activeLayout.stationPoints.Y19.x - 48}px`, top: `${activeLayout.stationPoints.Y19.y - 42}px` }}
+          ><i></i>下行</span>
+          <span
+            className="wear-direction-end-label terminal-y19 up"
+            style={{ left: `${activeLayout.stationPoints.Y19.x + 48}px`, top: `${activeLayout.stationPoints.Y19.y - 42}px` }}
+          ><i></i>上行</span>
+          <span
+            className="wear-direction-end-label terminal-y6 up"
+            style={{ left: `${activeLayout.stationPoints.Y6.x + 128}px`, top: `${activeLayout.stationPoints.Y6.y - 38}px` }}
+          ><i></i>上行</span>
+          <span
+            className="wear-direction-end-label terminal-y6 down"
+            style={{ left: `${activeLayout.stationPoints.Y6.x + 128}px`, top: `${activeLayout.stationPoints.Y6.y + 38}px` }}
+          ><i></i>下行</span>
+      </div>
+
     </>
   );
 
@@ -542,6 +560,31 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
+  const renderSelectedRailMapCard = (expanded = false) => (
+    <aside
+      key={railKey(selectedPoint.direction, selectedPoint.number, selectedRailSide)}
+      className={`selected-rail-map-card ${expanded ? "expanded" : ""}`}
+      aria-live="polite"
+      aria-label={`目前選取${directionText[selectedPoint.direction]}${selectedCode}，${selectedPoint.from.name}至${selectedPoint.to.name}`}
+    >
+      <header>
+        <p>目前選取軌道</p>
+        <div>
+          <strong>{selectedCode}</strong>
+          <span className={`selected-map-status ${selectedStatus}`}>{statusText[selectedStatus]}</span>
+        </div>
+        <small>監測點 {selectedPoint.number} · {config.measurement}</small>
+      </header>
+      <dl>
+        <div><dt>方向</dt><dd>{directionText[selectedPoint.direction]}</dd></div>
+        <div><dt>軌別</dt><dd>{sideText[selectedRailSide]}</dd></div>
+        <div className="selected-map-location"><dt>站間</dt><dd><span>{selectedPoint.from.id} {selectedPoint.from.name}</span><i>→</i><span>{selectedPoint.to.id} {selectedPoint.to.name}</span></dd></div>
+        <div><dt>量測</dt><dd>{selectedReading.wear.toFixed(2)} mm</dd></div>
+        <div><dt>狀態</dt><dd className={selectedStatus}>{statusText[selectedStatus]}</dd></div>
+      </dl>
+    </aside>
+  );
+
   return (
     <main className={`app-shell wear-page ${mode === "side" ? "side-wear-page" : "tread-wear-page"}`}>
       <header className="topbar">
@@ -554,7 +597,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
           <a href="/wear" className={`nav-item ${mode === "tread" ? "active" : ""}`} aria-current={mode === "tread" ? "page" : undefined}>正面軌道總覽</a>
           <a href="/side-wear" className={`nav-item ${mode === "side" ? "active" : ""}`} aria-current={mode === "side" ? "page" : undefined}>側面軌道總覽</a>
         </nav>
-        <div className="sync-state"><span className="pulse-dot"></span>上／下行 · {config.measurement} · 示範模式</div>
+        <div className="sync-state"><span className="pulse-dot"></span>上／下行 · {config.measurement} · 門檻已設定</div>
       </header>
 
       <section className="page-content">
@@ -568,8 +611,8 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
         </div>
 
         <section className="summary-grid wear-summary-grid" aria-label={`${config.title}摘要`}>
-          <article className="summary-card danger-card"><span>需處理軌道</span><strong>{criticalCount}</strong><small>示範警戒值達 {config.critical} mm</small></article>
-          <article className="summary-card warning-card"><span>注意軌道</span><strong>{warningCount}</strong><small>{config.warning}–{config.critical - 0.1} mm</small></article>
+          <article className="summary-card danger-card"><span>達維修值軌道</span><strong>{criticalCount}</strong><small>{config.critical} mm 以上</small></article>
+          <article className="summary-card warning-card"><span>達管理值軌道</span><strong>{warningCount}</strong><small>{config.warning} mm 以上、未達 {config.critical} mm</small></article>
           <article className="summary-card"><span>正常軌道</span><strong>{normalCount}</strong><small>低於 {config.warning} mm</small></article>
           <article className="summary-card"><span>監測軌道總數</span><strong>{allRails.length}</strong><small>上行15點＋下行16點 × 左右軌</small></article>
         </section>
@@ -581,8 +624,8 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
               <div className="map-heading-actions wear-map-actions">
                 <div className="legend" aria-label="磨損狀態圖例">
                   <span><i className="legend-line normal"></i>正常</span>
-                  <span><i className="legend-line warning"></i>注意</span>
-                  <span><i className="legend-line critical"></i>需處理</span>
+                  <span><i className="legend-line warning"></i>管理值（黃）</span>
+                  <span><i className="legend-line critical"></i>維修值（紅）</span>
                 </div>
                 <div className="direction-filter" role="group" aria-label="顯示上行或下行">
                   {(["all", "up", "down"] as DirectionFilter[]).map((filter) => (
@@ -596,6 +639,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
             <div className="topology-stage wear-topology-stage wear-four-track-stage" ref={mapRef} role="group" aria-label={`環狀線上行與下行${config.title}地圖`}>
               <div className="map-orientation"><span>北</span><i></i></div>
               {renderTopology(layout)}
+              {renderSelectedRailMapCard()}
             </div>
 
             <div className="wear-route-footnote">
@@ -638,18 +682,18 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
               <div><span>Excel 項次</span><strong>{selectedPoint.number}</strong></div>
               <div><span>較前次增加</span><strong>+{selectedReading.change.toFixed(2)} mm</strong></div>
               <div><span>最近巡檢日期</span><strong>{selectedReading.inspectedAt}</strong></div>
-              <div><span>示範警戒值</span><strong>{config.critical.toFixed(1)} mm</strong></div>
+              <div><span>維修值</span><strong>{config.critical.toFixed(1)} mm</strong></div>
             </div>
 
             <div className="wear-gauge-card">
               <div><strong>{selectedDisplayCode} {config.measurement}程度</strong><span>{Math.round(selectedReading.wear / config.scaleMax * 100)}%</span></div>
-              <div className="wear-gauge"><i className={selectedStatus} style={{ width: `${Math.min(100, selectedReading.wear / config.scaleMax * 100)}%` }}></i><b style={{ left: `${config.critical / config.scaleMax * 100}%` }}></b></div>
-              <div className="wear-gauge-scale"><span>0 mm</span><span>注意 {config.warning} mm</span><span>警戒 {config.critical} mm</span><span>{config.scaleMax} mm</span></div>
+              <div className="wear-gauge" style={{ background: `linear-gradient(90deg, #dcf7ec 0 ${config.warning / config.scaleMax * 100}%, #fff3d7 ${config.warning / config.scaleMax * 100}% ${config.critical / config.scaleMax * 100}%, #ffe2e8 ${config.critical / config.scaleMax * 100}% 100%)` }}><i className={selectedStatus} style={{ width: `${Math.min(100, selectedReading.wear / config.scaleMax * 100)}%` }}></i><b className="management-marker" style={{ left: `${config.warning / config.scaleMax * 100}%` }}></b><b className="maintenance-marker" style={{ left: `${config.critical / config.scaleMax * 100}%` }}></b></div>
+              <div className="wear-gauge-scale"><span>0 mm</span><span>管理值 {config.warning} mm</span><span>維修值 {config.critical} mm</span><span>{config.scaleMax} mm</span></div>
             </div>
 
             <aside className={`wear-maintenance-note ${selectedStatus}`}>
-              <strong>{selectedStatus === "critical" ? "建議安排現場複查" : selectedStatus === "warning" ? "建議提高巡檢頻率" : "維持例行巡檢"}</strong>
-              <p>{selectedStatus === "critical" ? `${selectedDisplayCode} 已達示範警戒值，請確認量測位置並安排研磨或更換評估。` : selectedStatus === "warning" ? `${selectedDisplayCode} 尚未達示範警戒值，建議觀察下次量測的增加速度。` : `${selectedDisplayCode} 目前在正常範圍內，依原訂週期持續追蹤即可。`}</p>
+              <strong>{selectedStatus === "critical" ? "已達維修值，建議安排現場複查" : selectedStatus === "warning" ? "已達管理值，建議提高巡檢頻率" : "維持例行巡檢"}</strong>
+              <p>{selectedStatus === "critical" ? `${selectedDisplayCode} 已達 ${config.critical} mm 維修值，請確認量測位置並安排研磨或更換評估。` : selectedStatus === "warning" ? `${selectedDisplayCode} 已達 ${config.warning} mm 管理值、尚未達維修值，建議觀察下次量測的增加速度。` : `${selectedDisplayCode} 目前低於 ${config.warning} mm 管理值，依原訂週期持續追蹤即可。`}</p>
             </aside>
           </article>
 
@@ -677,7 +721,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
         <section className="panel alerts-panel wear-alerts-panel">
           <div className="panel-heading">
             <div><span className="panel-kicker">紅色異常清單 · {config.measurement}</span><h3>優先處理軌道</h3></div>
-            <span className="alerts-count">{criticalRails.length} 條軌道需處理</span>
+            <span className="alerts-count">{criticalRails.length} 條軌道達維修值</span>
           </div>
           <div className="alerts-table" role="table" aria-label={`${config.measurement}紅色異常軌道清單`}>
             <div className="table-row table-head" role="row"><span>軌道</span><span>目前磨耗量</span><span>軌道位置</span><span>相比前次</span><span>操作</span></div>
@@ -693,7 +737,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
                 </div>
               );
             })}
-            {!criticalRails.length && <div className="wear-alerts-empty">目前沒有達到紅色警戒的軌道。</div>}
+            {!criticalRails.length && <div className="wear-alerts-empty">目前沒有達到紅色維修值的軌道。</div>}
           </div>
         </section>
       </section>
@@ -705,6 +749,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
             <div className="map-modal-viewport-shell">
               <div className={`map-modal-viewport ${isDragging ? "dragging" : ""}`} ref={expandedMapRef} onWheel={handleWheel} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerEnd} onPointerCancel={handlePointerEnd}>
                 <div className="map-pan-layer" style={{ transform: `translate(${mapViewport.x}px, ${mapViewport.y}px) scale(${mapViewport.scale})` }}>{renderTopology(expandedLayout)}</div>
+                {renderSelectedRailMapCard(true)}
                 <div className="map-zoom-controls"><button type="button" onClick={() => zoomMap(0.2)} aria-label="放大">＋</button><button type="button" onClick={() => zoomMap(-0.2)} aria-label="縮小">−</button><output>{Math.round(mapViewport.scale * 100)}%</output><button type="button" className="reset-map-view" onClick={() => setMapViewport({ x: 0, y: 0, scale: 1 })}>重設</button></div>
                 <div className="map-drag-hint"><span>↔</span>拖曳移動 · 滾輪縮放</div>
               </div>
@@ -717,7 +762,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
         <div className="chart-modal-backdrop" role="presentation">
           <section className="chart-modal" role="dialog" aria-modal="true" aria-labelledby="wear-history-modal-title">
             <header className="chart-modal-header"><div><span className="panel-kicker">{directionText[selectedPoint.direction]} · {config.title} · {selectedCode}</span><h3 id="wear-history-modal-title">{selectedPoint.from.name}－{selectedPoint.to.name}歷史趨勢</h3></div><button type="button" className="chart-modal-close" onClick={() => setIsChartExpanded(false)} aria-label="關閉放大圖表">×</button></header>
-            <div className="chart-modal-devices"><span style={{ "--series-color": selectedRailSide === "left" ? "#0fa878" : "#e59a14" } as CSSProperties}><i></i><strong>{selectedDisplayCode} {sideText[selectedRailSide]}</strong> {selectedReading.wear.toFixed(2)} mm</span><small>單位：mm · 門檻目前為示範設定</small></div>
+            <div className="chart-modal-devices"><span style={{ "--series-color": selectedRailSide === "left" ? "#0fa878" : "#e59a14" } as CSSProperties}><i></i><strong>{selectedDisplayCode} {sideText[selectedRailSide]}</strong> {selectedReading.wear.toFixed(2)} mm</span><small>單位：mm · 黃色為管理值 · 紅色為維修值</small></div>
             <div className="chart-modal-canvas"><WearHistoryChart reading={selectedReading} code={selectedDisplayCode} config={config} expanded /></div>
           </section>
         </div>
