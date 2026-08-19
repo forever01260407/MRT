@@ -31,9 +31,21 @@ test("server-renders the rail lubrication monitoring dashboard", async () => {
   const html = await response.text();
   assert.match(html, /<title>環狀線鋼軌狀態監測中心<\/title>/i);
   assert.match(html, /匯入潤滑設備 Excel/);
+  assert.match(html, /現場登記/);
+  assert.match(html, /登記現場量測/);
   assert.match(html, /固定潤滑設備/);
   assert.match(html, /MOK 10 · LB 10/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
+});
+
+test("provides authenticated manual field registration backed by D1", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /手動登記現場量測值/);
+  assert.match(page, /inspector:\s*manualEntry\.inspector\.trim\(\) \|\| "未指定"/);
+  assert.match(page, /recordType:\s*manualEntry\.recordType/);
+  assert.match(page, /fetch\("\/api\/lubrication"/);
+  assert.match(page, /確認登錄並即時同步/);
 });
 
 test("keeps complete imported history and enables chart navigation", async () => {

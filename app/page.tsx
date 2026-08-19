@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import type { ChangeEvent, CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { calculateConsumptionBaseline, forecastOilLevel } from "./lib/consumptionBaseline";
 import { LubricationImportError, readLubricationWorkbook } from "./lib/lubricationExcel";
 import type { LubricationRecord } from "./lib/lubricationExcel";
@@ -76,6 +76,20 @@ type PendingImport = {
   fileHash: string;
   records: LubricationRecord[];
   duplicateCount: number;
+};
+
+type ManualEntryForm = {
+  deviceId: string;
+  oilLevel: string;
+  measuredDate: string;
+  inspector: string;
+  recordType: LubricationRecord["recordType"];
+  refillAmount: string;
+};
+
+type ManualEntryFeedback = {
+  status: "idle" | "saving" | "success" | "error";
+  message: string;
 };
 
 const stations: Station[] = [
@@ -601,6 +615,8 @@ export default function Home() {
   const closeMapButtonRef = useRef<HTMLButtonElement>(null);
   const expandChartButtonRef = useRef<HTMLButtonElement>(null);
   const closeChartButtonRef = useRef<HTMLButtonElement>(null);
+  const manualEntryTriggerRef = useRef<HTMLButtonElement>(null);
+  const closeManualEntryButtonRef = useRef<HTMLButtonElement>(null);
   const mapDragRef = useRef({ pointerId: -1, startX: 0, startY: 0, originX: 0, originY: 0, moved: false });
   const [mapSize, setMapSize] = useState({ width: 1000, height: 680 });
   const [expandedMapSize, setExpandedMapSize] = useState({ width: 1400, height: 760 });
@@ -611,6 +627,19 @@ export default function Home() {
   const [isMapDragging, setIsMapDragging] = useState(false);
   const [mapViewport, setMapViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [isChartExpanded, setIsChartExpanded] = useState(false);
+  const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
+  const [manualEntry, setManualEntry] = useState<ManualEntryForm>(() => ({
+    deviceId: "",
+    oilLevel: "",
+    measuredDate: todayInTaipei(),
+    inspector: "",
+    recordType: "量測",
+    refillAmount: "",
+  }));
+  const [manualEntryFeedback, setManualEntryFeedback] = useState<ManualEntryFeedback>({
+    status: "idle",
+    message: "登入後可將現場量測直接寫入 D1。",
+  });
   const [forecastDate, setForecastDate] = useState(todayInTaipei);
   const [activeSegments, setActiveSegments] = useState<Segment[]>(segments);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
@@ -714,6 +743,25 @@ export default function Home() {
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [isChartExpanded]);
+
+  useEffect(() => {
+    if (!isManualEntryOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeManualEntryButtonRef.current?.focus();
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || manualEntryFeedback.status === "saving") return;
+      setIsManualEntryOpen(false);
+      window.requestAnimationFrame(() => manualEntryTriggerRef.current?.focus());
+    };
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isManualEntryOpen, manualEntryFeedback.status]);
 
   const closeExpandedChart = () => {
     setIsChartExpanded(false);
@@ -860,6 +908,104 @@ export default function Home() {
     .slice(0, 6), [allDeviceRecords]);
   const criticalCount = allDeviceRecords.filter(({ device }) => device.status === "critical").length;
   const warningCount = allDeviceRecords.filter(({ device }) => device.status === "warning").length;
+  const manualDeviceOptions = useMemo(() => Array.from(new Set(allDeviceRecords.map(({ device }) => device.id)))
+    .sort((left, right) => left.localeCompare(right, "en", { numeric: true })), [allDeviceRecords]);
+
+  const openManualEntry = () => {
+    setManualEntry({
+      deviceId: selectedDevice?.id ?? manualDeviceOptions[0] ?? "",
+      oilLevel: selectedDevice && hasDeviceData(selectedDevice) ? String(selectedDevice.value) : "",
+      measuredDate: todayInTaipei(),
+      inspector: "",
+      recordType: "量測",
+      refillAmount: "",
+    });
+    setManualEntryFeedback({ status: "idle", message: "填寫完成後會立即同步至 D1 永久資料庫。" });
+    setIsManualEntryOpen(true);
+  };
+
+  const closeManualEntry = () => {
+    if (manualEntryFeedback.status === "saving") return;
+    setIsManualEntryOpen(false);
+    window.requestAnimationFrame(() => manualEntryTriggerRef.current?.focus());
+  };
+
+  const submitManualEntry = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const oilLevel = Number(manualEntry.oilLevel);
+    const refillAmount = manualEntry.recordType === "補油" ? Number(manualEntry.refillAmount) : null;
+    if (!manualEntry.deviceId || !manualEntry.measuredDate || !Number.isFinite(oilLevel) || oilLevel < 0) {
+      setManualEntryFeedback({ status: "error", message: "請完整填寫設備、現場油量與量測日期。" });
+      return;
+    }
+    if (manualEntry.recordType === "補油" && (!Number.isFinite(refillAmount) || refillAmount === null || refillAmount <= 0)) {
+      setManualEntryFeedback({ status: "error", message: "補油紀錄必須填寫大於 0 的本次補油量。" });
+      return;
+    }
+
+    const record: LubricationRecord = {
+      deviceId: manualEntry.deviceId,
+      measuredAt: `${manualEntry.measuredDate}T00:00:00`,
+      oilLevel: Number(oilLevel.toFixed(2)),
+      inspector: manualEntry.inspector.trim() || "未指定",
+      recordType: manualEntry.recordType,
+      refillAmount: manualEntry.recordType === "補油" ? Number(refillAmount!.toFixed(2)) : null,
+    };
+
+    setManualEntryFeedback({ status: "saving", message: "正在寫入 D1 並更新監測畫面…" });
+    try {
+      const response = await fetch("/api/lubrication", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fileName: `現場登記-${record.deviceId}-${manualEntry.measuredDate}`,
+          fileHash: `manual-${crypto.randomUUID()}`,
+          records: [record],
+        }),
+      });
+      const payload = await response.json() as {
+        records?: LubricationRecord[];
+        insertedCount?: number;
+        duplicateCount?: number;
+        error?: string;
+        details?: string[];
+        conflicts?: string[];
+      };
+      if (!response.ok || !payload.records) {
+        throw new LubricationImportError(payload.conflicts ?? payload.details ?? [payload.error ?? "現場紀錄無法寫入永久資料庫。"]);
+      }
+
+      const latestRecord = syncRecordsToDashboard(payload.records);
+      const targetSegment = activeSegments.find((segment) => segment.devices.some((device) => device.id === record.deviceId));
+      if (targetSegment) {
+        setSelectedSegmentId(targetSegment.id);
+        setSelectedDeviceId(record.deviceId);
+        setComparedDeviceIds([record.deviceId]);
+      }
+      setExcelImport({
+        status: "success",
+        message: `D1 永久資料庫已同步 ${payload.records.length} 筆紀錄。新的 Excel 會只新增尚未存在的資料。`,
+        recordCount: payload.records.length,
+        deviceCount: new Set(payload.records.map((item) => item.deviceId)).size,
+        insertedCount: payload.insertedCount ?? 0,
+        duplicateCount: payload.duplicateCount ?? 0,
+        latestMeasuredAt: latestRecord?.measuredAt,
+      });
+      setManualEntryFeedback({
+        status: "success",
+        message: (payload.insertedCount ?? 0) > 0
+          ? `${record.deviceId}｜${manualEntry.measuredDate} ${record.recordType}紀錄已同步。`
+          : `${record.deviceId}｜${manualEntry.measuredDate} 的相同紀錄已存在，未重複寫入。`,
+      });
+      setIsManualEntryOpen(false);
+      window.requestAnimationFrame(() => manualEntryTriggerRef.current?.focus());
+    } catch (error) {
+      const details = error instanceof LubricationImportError
+        ? error.details
+        : [error instanceof Error ? error.message : "現場紀錄無法寫入永久資料庫。"];
+      setManualEntryFeedback({ status: "error", message: details[0] ?? "現場紀錄無法寫入永久資料庫。" });
+    }
+  };
 
   const handleExcelImport = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1165,28 +1311,50 @@ export default function Home() {
           <div className="updated-at">資料時間 <strong>{excelImport.latestMeasuredAt ? formatMeasurementTime(excelImport.latestMeasuredAt) : "讀取中"}</strong></div>
         </div>
 
-        <section className={`excel-import-panel ${excelImport.status}`} aria-labelledby="excel-import-title">
-          <div className="excel-import-icon" aria-hidden="true"><span>XL</span></div>
-          <div className="excel-import-copy">
-            <span className="panel-kicker">LUBRICATION DATA IMPORT</span>
-            <h3 id="excel-import-title">匯入潤滑設備 Excel</h3>
-            <p>先檢查預覽，再寫入 D1。完全相同資料會略過；同設備、同日期但內容不同時會整批阻擋。</p>
-          </div>
-          <div className="excel-import-actions">
-            <a className="excel-template-link" href="/潤滑設備量測匯入範本.xlsx" download>下載 Excel 範本</a>
-            <button type="button" className="excel-import-button" onClick={() => excelInputRef.current?.click()} disabled={excelImport.status === "loading" || excelImport.status === "saving"}>
-              {excelImport.status === "loading" ? "讀取中…" : pendingImport ? "重新選擇 Excel" : "選擇 Excel 匯入"}
-            </button>
-            <input ref={excelInputRef} className="visually-hidden-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleExcelImport} />
-            {pendingImport ? <button type="button" className="excel-confirm-button" onClick={confirmExcelImport} disabled={excelImport.status === "saving"}>{excelImport.status === "saving" ? "寫入中…" : "確認寫入 D1"}</button> : null}
-            {pendingImport ? <button type="button" className="excel-reset-button" onClick={cancelPendingImport} disabled={excelImport.status === "saving"}>取消</button> : null}
-          </div>
-          <div className="excel-import-result" role="status" aria-live="polite">
-            <strong>{excelImport.status === "error" ? "需要修正" : excelImport.status === "success" ? "資料庫已同步" : excelImport.status === "preview" ? "等待確認" : excelImport.status === "saving" ? "正在寫入" : excelImport.status === "loading" ? "正在處理" : "尚未匯入"}</strong>
-            <span>{excelImport.message}</span>
-            {excelImport.errors?.length ? <ul>{excelImport.errors.map((error) => <li key={error}>{error}</li>)}</ul> : null}
-          </div>
-        </section>
+        <div className="data-entry-grid">
+          <section className={`excel-import-panel ${excelImport.status}`} aria-labelledby="excel-import-title">
+            <div className="excel-import-icon" aria-hidden="true"><span>XL</span></div>
+            <div className="excel-import-copy">
+              <span className="panel-kicker">LUBRICATION DATA IMPORT</span>
+              <h3 id="excel-import-title">匯入潤滑設備 Excel</h3>
+              <p>先檢查預覽，再寫入 D1。完全相同資料會略過；同設備、同日期但內容不同時會整批阻擋。</p>
+            </div>
+            <div className="excel-import-actions">
+              <a className="excel-template-link" href="/潤滑設備量測匯入範本.xlsx" download>下載 Excel 範本</a>
+              <button type="button" className="excel-import-button" onClick={() => excelInputRef.current?.click()} disabled={excelImport.status === "loading" || excelImport.status === "saving"}>
+                {excelImport.status === "loading" ? "讀取中…" : pendingImport ? "重新選擇 Excel" : "選擇 Excel 匯入"}
+              </button>
+              <input ref={excelInputRef} className="visually-hidden-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleExcelImport} />
+              {pendingImport ? <button type="button" className="excel-confirm-button" onClick={confirmExcelImport} disabled={excelImport.status === "saving"}>{excelImport.status === "saving" ? "寫入中…" : "確認寫入 D1"}</button> : null}
+              {pendingImport ? <button type="button" className="excel-reset-button" onClick={cancelPendingImport} disabled={excelImport.status === "saving"}>取消</button> : null}
+            </div>
+            <div className="excel-import-result" role="status" aria-live="polite">
+              <strong>{excelImport.status === "error" ? "需要修正" : excelImport.status === "success" ? "資料庫已同步" : excelImport.status === "preview" ? "等待確認" : excelImport.status === "saving" ? "正在寫入" : excelImport.status === "loading" ? "正在處理" : "尚未匯入"}</strong>
+              <span>{excelImport.message}</span>
+              {excelImport.errors?.length ? <ul>{excelImport.errors.map((error) => <li key={error}>{error}</li>)}</ul> : null}
+            </div>
+          </section>
+
+          <section className={`manual-entry-panel ${manualEntryFeedback.status}`} aria-labelledby="manual-entry-panel-title">
+            <div className="manual-entry-icon" aria-hidden="true">＋</div>
+            <div className="manual-entry-copy">
+              <span className="panel-kicker">ON-SITE MEASUREMENT</span>
+              <h3 id="manual-entry-panel-title">現場登記</h3>
+              <p>現場量測完成後直接登記，確認後即時寫入 D1 並更新監測畫面。</p>
+            </div>
+            <button
+              type="button"
+              className="manual-entry-open-button"
+              ref={manualEntryTriggerRef}
+              onClick={openManualEntry}
+              aria-haspopup="dialog"
+            ><span aria-hidden="true">＋</span>登記現場量測</button>
+            <div className="manual-entry-feedback" role="status" aria-live="polite">
+              <strong>{manualEntryFeedback.status === "success" ? "現場紀錄已同步" : manualEntryFeedback.status === "error" ? "登記未完成" : "即時寫入"}</strong>
+              <span>{manualEntryFeedback.message}</span>
+            </div>
+          </section>
+        </div>
 
         <section className="summary-grid" aria-label="全線摘要">
           <article className="summary-card danger-card"><span>需處理設備</span><strong>{criticalCount}</strong><small>優先安排現場複查</small></article>
@@ -1482,6 +1650,139 @@ export default function Home() {
             )}
           </aside>
         </section>
+
+        {isManualEntryOpen ? (
+          <div
+            className="manual-entry-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeManualEntry();
+            }}
+          >
+            <section
+              className="manual-entry-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="manual-entry-title"
+              aria-describedby="manual-entry-description"
+            >
+              <header className="manual-entry-modal-header">
+                <div>
+                  <span className="panel-kicker">ON-SITE MEASUREMENT</span>
+                  <h3 id="manual-entry-title"><span aria-hidden="true">＋</span>手動登記現場量測值</h3>
+                  <p id="manual-entry-description">確認後會立即寫入 D1；人員留白時自動記錄為「未指定」。</p>
+                </div>
+                <button
+                  type="button"
+                  className="manual-entry-close"
+                  ref={closeManualEntryButtonRef}
+                  onClick={closeManualEntry}
+                  disabled={manualEntryFeedback.status === "saving"}
+                  aria-label="關閉現場登記"
+                >×</button>
+              </header>
+
+              <form className="manual-entry-form" onSubmit={submitManualEntry} aria-busy={manualEntryFeedback.status === "saving"}>
+                <label className="manual-entry-field full-width">
+                  <span>設備名稱 <b>*</b></span>
+                  <select
+                    value={manualEntry.deviceId}
+                    onChange={(event) => setManualEntry((current) => ({ ...current, deviceId: event.target.value }))}
+                    disabled={manualEntryFeedback.status === "saving"}
+                    required
+                  >
+                    <option value="" disabled>請選擇設備</option>
+                    {manualDeviceOptions.map((deviceId) => <option key={deviceId} value={deviceId}>{deviceId}</option>)}
+                  </select>
+                </label>
+
+                <div className="manual-entry-field-row">
+                  <label className="manual-entry-field">
+                    <span>現場顯示油量（L）<b>*</b></span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={manualEntry.oilLevel}
+                      onChange={(event) => setManualEntry((current) => ({ ...current, oilLevel: event.target.value }))}
+                      disabled={manualEntryFeedback.status === "saving"}
+                      placeholder="例如：50"
+                      required
+                    />
+                  </label>
+                  <label className="manual-entry-field">
+                    <span>量測日期 <b>*</b></span>
+                    <input
+                      type="date"
+                      max={todayInTaipei()}
+                      value={manualEntry.measuredDate}
+                      onChange={(event) => setManualEntry((current) => ({ ...current, measuredDate: event.target.value }))}
+                      disabled={manualEntryFeedback.status === "saving"}
+                      required
+                    />
+                  </label>
+                </div>
+
+                <label className="manual-entry-field full-width">
+                  <span>量測巡檢人員</span>
+                  <input
+                    type="text"
+                    maxLength={100}
+                    value={manualEntry.inspector}
+                    onChange={(event) => setManualEntry((current) => ({ ...current, inspector: event.target.value }))}
+                    disabled={manualEntryFeedback.status === "saving"}
+                    placeholder="留空將自動記錄為未指定"
+                  />
+                </label>
+
+                <div className="manual-entry-field-row">
+                  <label className="manual-entry-field">
+                    <span>狀態描述 <b>*</b></span>
+                    <select
+                      value={manualEntry.recordType}
+                      onChange={(event) => setManualEntry((current) => ({
+                        ...current,
+                        recordType: event.target.value as LubricationRecord["recordType"],
+                        refillAmount: event.target.value === "量測" ? "" : current.refillAmount,
+                      }))}
+                      disabled={manualEntryFeedback.status === "saving"}
+                    >
+                      <option value="量測">量測</option>
+                      <option value="補油">補油</option>
+                    </select>
+                  </label>
+                  {manualEntry.recordType === "補油" ? (
+                    <label className="manual-entry-field">
+                      <span>本次補油量（L）<b>*</b></span>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        inputMode="decimal"
+                        value={manualEntry.refillAmount}
+                        onChange={(event) => setManualEntry((current) => ({ ...current, refillAmount: event.target.value }))}
+                        disabled={manualEntryFeedback.status === "saving"}
+                        placeholder="例如：20"
+                        required
+                      />
+                    </label>
+                  ) : <div className="manual-entry-type-note">量測紀錄只保存現場顯示油量。</div>}
+                </div>
+
+                {manualEntryFeedback.status === "error" ? (
+                  <div className="manual-entry-error" role="alert">{manualEntryFeedback.message}</div>
+                ) : null}
+
+                <footer className="manual-entry-form-actions">
+                  <button type="button" className="manual-entry-cancel" onClick={closeManualEntry} disabled={manualEntryFeedback.status === "saving"}>取消</button>
+                  <button type="submit" className="manual-entry-submit" disabled={manualEntryFeedback.status === "saving"}>
+                    {manualEntryFeedback.status === "saving" ? "同步中…" : "確認登錄並即時同步"}
+                  </button>
+                </footer>
+              </form>
+            </section>
+          </div>
+        ) : null}
 
         {isMapExpanded ? (
           <div
