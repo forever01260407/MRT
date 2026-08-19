@@ -193,7 +193,6 @@ export default function MonitorPage() {
           <a href="/" className="nav-item">潤滑設備總覽</a>
           <a href="/wear" className="nav-item">正面軌道總覽</a>
           <a href="/side-wear" className="nav-item">側面軌道總覽</a>
-          <a href="/monitor" className="nav-item active" aria-current="page">Monitor 完整紀錄</a>
         </nav>
         <div className="sync-state"><span className="pulse-dot"></span>完整歷程已連線</div>
       </header>
@@ -301,4 +300,3 @@ export default function MonitorPage() {
     </main>
   );
 }
-

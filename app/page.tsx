@@ -1297,7 +1297,6 @@ export default function Home() {
           <a href="/" className="nav-item active" aria-current="page">潤滑設備總覽</a>
           <a href="/wear" className="nav-item">正面軌道總覽</a>
           <a href="/side-wear" className="nav-item">側面軌道總覽</a>
-          <a href="/monitor" className="nav-item">Monitor 完整紀錄</a>
         </nav>
         <div className="sync-state"><span className="pulse-dot"></span>{excelImport.status === "success" ? "D1 永久資料庫已同步" : excelImport.status === "loading" || excelImport.status === "saving" ? "資料庫同步中" : "資料庫等待確認"}</div>
       </header>

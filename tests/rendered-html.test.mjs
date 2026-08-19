@@ -34,7 +34,7 @@ test("server-renders the rail lubrication monitoring dashboard", async () => {
   assert.match(html, /現場登記/);
   assert.match(html, /登記現場量測/);
   assert.match(html, /Monitor Area/);
-  assert.match(html, /Monitor 完整紀錄/);
+  assert.doesNotMatch(html, /class="nav-item"[^>]*>Monitor 完整紀錄/);
   assert.match(html, /固定潤滑設備/);
   assert.match(html, /MOK 10 · LB 10/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
