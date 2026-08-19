@@ -5,8 +5,11 @@ import { sites } from "./build/sites-vite-plugin";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
+const CLOUDFLARE_WORKERS_DATABASE_ID =
+  "5f8b3550-74b0-4ada-a067-d0e99a4e490a";
 
 const { d1, r2 } = hostingConfig;
+const isCloudflareWorkersBuild = process.env.WORKERS_CI === "1";
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
@@ -18,8 +21,12 @@ const localBindingConfig = {
     ? [
         {
           binding: d1,
-          database_name: "site-creator-d1",
-          database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
+          database_name: isCloudflareWorkersBuild
+            ? "mrt-lubrication-monitor"
+            : "site-creator-d1",
+          database_id: isCloudflareWorkersBuild
+            ? CLOUDFLARE_WORKERS_DATABASE_ID
+            : SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
         },
       ]
     : [],
