@@ -89,6 +89,7 @@ button:focus-visible {
 .updated-at strong { color: var(--ink); }
 
 .excel-import-panel {
+  width: calc(50% - 8px);
   margin-bottom: 16px;
   padding: 16px 18px 13px;
   display: grid;
@@ -834,12 +835,15 @@ button:focus-visible {
   .topbar { grid-template-columns: 1fr auto; }
   .topnav { justify-self: end; }
   .sync-state { display: none; }
+  .excel-import-panel { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+  .excel-import-actions, .excel-import-result { grid-column: 1 / -1; justify-content: flex-start; }
   .topology-stage { height: 650px; }
   .map-zone { opacity: .65; }
   .device-track-label { font-size: 9px; }
 }
 
 @media (max-width: 980px) {
+  .excel-import-panel { width: 100%; }
   .workspace-grid { grid-template-columns: 1fr; }
   .topology-stage { height: 680px; }
   .station-y8.label-bottom .station-label { left: 70px; top: 101px; transform: none; text-align: left; }
