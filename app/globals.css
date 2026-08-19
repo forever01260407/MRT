@@ -101,13 +101,15 @@ button:focus-visible {
   box-shadow: 0 4px 16px rgba(36, 49, 75, .045);
 }
 .excel-import-panel.success { border-color: #aee6d2; background: linear-gradient(135deg, #fff 48%, var(--success-soft)); }
+.excel-import-panel.preview { border-color: #f0d38d; background: linear-gradient(135deg, #fff 48%, var(--warning-soft)); }
+.excel-import-panel.saving { border-color: #bdb6f7; background: linear-gradient(135deg, #fff 48%, var(--violet-soft)); }
 .excel-import-panel.error { border-color: #ffc4cf; background: linear-gradient(135deg, #fff 48%, var(--danger-soft)); }
 .excel-import-icon { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 13px; color: #fff; background: #168b5b; box-shadow: 0 6px 14px rgba(22, 139, 91, .2); }
 .excel-import-icon span { font-size: 13px; font-weight: 950; letter-spacing: .05em; }
 .excel-import-copy h3 { margin: 3px 0 3px; font-size: 17px; }
 .excel-import-copy p { margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.55; }
 .excel-import-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.excel-template-link, .excel-import-button, .excel-reset-button {
+.excel-template-link, .excel-import-button, .excel-confirm-button, .excel-reset-button {
   min-height: 38px;
   padding: 8px 12px;
   display: inline-flex;
@@ -123,13 +125,16 @@ button:focus-visible {
 .excel-template-link:hover { border-color: var(--violet); background: var(--violet-soft); }
 .excel-import-button { border: 1px solid var(--violet); color: #fff; background: var(--violet); box-shadow: 0 5px 12px rgba(98, 85, 223, .18); }
 .excel-import-button:hover { background: #5145c7; }
-.excel-import-button:disabled { opacity: .65; cursor: wait; }
+.excel-confirm-button { border: 1px solid #087b59; color: #fff; background: #087b59; box-shadow: 0 5px 12px rgba(8, 123, 89, .16); }
+.excel-confirm-button:hover { background: #06694c; }
+.excel-import-button:disabled, .excel-confirm-button:disabled, .excel-reset-button:disabled { opacity: .65; cursor: wait; }
 .excel-reset-button { border: 1px solid var(--line); color: var(--ink-soft); background: #fff; }
 .excel-reset-button:hover { border-color: var(--ink-soft); }
 .visually-hidden-file { width: 1px; height: 1px; position: absolute; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .excel-import-result { grid-column: 2 / -1; padding-top: 10px; display: flex; align-items: flex-start; gap: 9px; border-top: 1px solid rgba(130, 144, 165, .2); color: var(--ink-soft); font-size: 11px; }
 .excel-import-result strong { flex: 0 0 auto; color: var(--ink); }
 .excel-import-panel.success .excel-import-result strong { color: #087b59; }
+.excel-import-panel.preview .excel-import-result strong { color: #a56800; }
 .excel-import-panel.error .excel-import-result strong { color: #b32643; }
 .excel-import-result span { line-height: 1.55; }
 .excel-import-result ul { margin: 0; padding-left: 18px; color: #b32643; line-height: 1.55; }

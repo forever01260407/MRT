@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { calculateConsumptionBaseline, forecastOilLevel } from "./lib/consumptionBaseline";
 import { LubricationImportError, readLubricationWorkbook } from "./lib/lubricationExcel";
@@ -60,13 +60,22 @@ type RouteLayout = {
 };
 
 type ExcelImportState = {
-  status: "idle" | "loading" | "success" | "error";
+  status: "idle" | "loading" | "preview" | "saving" | "success" | "error";
   message: string;
   fileName?: string;
   recordCount?: number;
   deviceCount?: number;
+  duplicateCount?: number;
+  insertedCount?: number;
   latestMeasuredAt?: string;
   errors?: string[];
+};
+
+type PendingImport = {
+  fileName: string;
+  fileHash: string;
+  records: LubricationRecord[];
+  duplicateCount: number;
 };
 
 const stations: Station[] = [
@@ -292,6 +301,11 @@ function formatMeasurementTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value.slice(0, 10);
   return new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric" }).format(date);
+}
+
+async function sha256Hex(file: File) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function formatChartDate(value: string) {
@@ -599,10 +613,52 @@ export default function Home() {
   const [isChartExpanded, setIsChartExpanded] = useState(false);
   const [forecastDate, setForecastDate] = useState(todayInTaipei);
   const [activeSegments, setActiveSegments] = useState<Segment[]>(segments);
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [excelImport, setExcelImport] = useState<ExcelImportState>({
-    status: "idle",
-    message: "尚未匯入 Excel，目前顯示網站內建示範資料。",
+    status: "loading",
+    message: "正在從 D1 永久資料庫讀取潤滑紀錄…",
   });
+
+  const syncRecordsToDashboard = useCallback((records: LubricationRecord[]) => {
+    const nextSegments = applyImportedRecords(segments, records);
+    setActiveSegments(nextSegments);
+    const latestRecord = [...records].sort((a, b) => a.measuredAt.localeCompare(b.measuredAt)).at(-1);
+    if (!latestRecord) return null;
+    const latestSegment = nextSegments.find((segment) => segment.devices.some((device) => device.id === latestRecord.deviceId));
+    if (latestSegment) {
+      setSelectedSegmentId(latestSegment.id);
+      setSelectedDeviceId(latestRecord.deviceId);
+      setComparedDeviceIds([latestRecord.deviceId]);
+    }
+    return latestRecord;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/lubrication", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as { records?: LubricationRecord[]; error?: string };
+        if (!response.ok || !payload.records) throw new Error(payload.error ?? "無法讀取永久資料庫。");
+        if (cancelled) return;
+        const latestRecord = syncRecordsToDashboard(payload.records);
+        setExcelImport({
+          status: "success",
+          message: `D1 永久資料庫已載入 ${payload.records.length} 筆紀錄。新的 Excel 會只新增尚未存在的資料。`,
+          recordCount: payload.records.length,
+          deviceCount: new Set(payload.records.map((record) => record.deviceId)).size,
+          latestMeasuredAt: latestRecord?.measuredAt,
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setExcelImport({
+          status: "error",
+          message: "永久資料庫目前無法讀取，畫面暫時保留示範資料。",
+          errors: [error instanceof Error ? error.message : "未知錯誤"],
+        });
+      });
+    return () => { cancelled = true; };
+  }, [syncRecordsToDashboard]);
 
   useEffect(() => {
     const element = topologyRef.current;
@@ -811,27 +867,23 @@ export default function Home() {
     setExcelImport({ status: "loading", message: `正在讀取 ${file.name}…`, fileName: file.name });
 
     try {
-      const records = await readLubricationWorkbook(file);
-      const nextSegments = applyImportedRecords(segments, records);
+      const [{ records, duplicateCount }, fileHash] = await Promise.all([
+        readLubricationWorkbook(file),
+        sha256Hex(file),
+      ]);
+      const uniqueRecordCount = records.length - duplicateCount;
       const importedDeviceIds = new Set(records.map((record) => record.deviceId));
-      const latestRecord = [...records].sort((a, b) => a.measuredAt.localeCompare(b.measuredAt)).at(-1)!;
-      const latestSegment = nextSegments.find((segment) => segment.devices.some((device) => device.id === latestRecord.deviceId));
-
-      setActiveSegments(nextSegments);
-      if (latestSegment) {
-        setSelectedSegmentId(latestSegment.id);
-        setSelectedDeviceId(latestRecord.deviceId);
-        setComparedDeviceIds([latestRecord.deviceId]);
-      }
+      setPendingImport({ fileName: file.name, fileHash, records, duplicateCount });
       setExcelImport({
-        status: "success",
-        message: `已匯入 ${records.length} 筆紀錄，更新 ${importedDeviceIds.size} 台設備。未出現在 Excel 的設備標示為無資料。`,
+        status: "preview",
+        message: `檢查完成：${uniqueRecordCount} 筆不重複紀錄、${importedDeviceIds.size} 台設備${duplicateCount ? `，Excel 內另有 ${duplicateCount} 筆完全相同資料會略過` : ""}。確認後才會寫入 D1。`,
         fileName: file.name,
-        recordCount: records.length,
+        recordCount: uniqueRecordCount,
         deviceCount: importedDeviceIds.size,
-        latestMeasuredAt: latestRecord.measuredAt,
+        duplicateCount,
       });
     } catch (error) {
+      setPendingImport(null);
       const details = error instanceof LubricationImportError
         ? error.details
         : [error instanceof Error ? error.message : "Excel 讀取失敗，請確認檔案格式。"];
@@ -846,12 +898,63 @@ export default function Home() {
     }
   };
 
-  const resetExcelImport = () => {
-    setActiveSegments(segments);
-    setSelectedSegmentId("Y10-Y11");
-    setSelectedDeviceId("MOK3");
-    setComparedDeviceIds(["MOK3"]);
-    setExcelImport({ status: "idle", message: "已回復網站內建示範資料。" });
+  const confirmExcelImport = async () => {
+    if (!pendingImport) return;
+    setExcelImport((current) => ({ ...current, status: "saving", message: `正在比對並寫入 ${pendingImport.fileName}…`, errors: undefined }));
+    try {
+      const response = await fetch("/api/lubrication", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(pendingImport),
+      });
+      const payload = await response.json() as {
+        records?: LubricationRecord[];
+        insertedCount?: number;
+        duplicateCount?: number;
+        error?: string;
+        details?: string[];
+        conflicts?: string[];
+      };
+      if (!response.ok || !payload.records) {
+        throw new LubricationImportError(payload.conflicts ?? payload.details ?? [payload.error ?? "無法寫入永久資料庫。"]);
+      }
+
+      const latestRecord = syncRecordsToDashboard(payload.records);
+      const insertedCount = payload.insertedCount ?? 0;
+      const duplicateCount = payload.duplicateCount ?? 0;
+      setPendingImport(null);
+      setExcelImport({
+        status: "success",
+        message: `D1 寫入完成：新增 ${insertedCount} 筆、略過 ${duplicateCount} 筆相同資料；資料庫目前共有 ${payload.records.length} 筆。`,
+        fileName: pendingImport.fileName,
+        recordCount: payload.records.length,
+        deviceCount: new Set(payload.records.map((record) => record.deviceId)).size,
+        insertedCount,
+        duplicateCount,
+        latestMeasuredAt: latestRecord?.measuredAt,
+      });
+    } catch (error) {
+      const details = error instanceof LubricationImportError
+        ? error.details
+        : [error instanceof Error ? error.message : "Excel 無法寫入永久資料庫。"];
+      setExcelImport((current) => ({
+        ...current,
+        status: "error",
+        message: "本次整批沒有寫入，請確認衝突資料後再試一次。",
+        errors: details,
+      }));
+    }
+  };
+
+  const cancelPendingImport = () => {
+    setPendingImport(null);
+    setExcelImport((current) => ({
+      status: "success",
+      message: "已取消這次匯入；D1 內既有資料沒有變動。",
+      recordCount: current.recordCount,
+      deviceCount: current.deviceCount,
+      latestMeasuredAt: current.latestMeasuredAt,
+    }));
   };
 
   const chooseDefaultDevice = (segment: Segment) => {
@@ -1049,7 +1152,7 @@ export default function Home() {
           <a href="/wear" className="nav-item">正面軌道總覽</a>
           <a href="/side-wear" className="nav-item">側面軌道總覽</a>
         </nav>
-        <div className="sync-state"><span className="pulse-dot"></span>{excelImport.status === "success" ? "Excel 資料已載入" : "UI 草圖 · 模擬資料"}</div>
+        <div className="sync-state"><span className="pulse-dot"></span>{excelImport.status === "success" ? "D1 永久資料庫已同步" : excelImport.status === "loading" || excelImport.status === "saving" ? "資料庫同步中" : "資料庫等待確認"}</div>
       </header>
 
       <section className="page-content">
@@ -1059,7 +1162,7 @@ export default function Home() {
             <h2>從軌道線段直接定位設備</h2>
             <p>區間長度依設備數量自動配置；點軌道查看單台設備，再勾選同區間設備即可在一張圖比較多條曲線。</p>
           </div>
-          <div className="updated-at">資料時間 <strong>{excelImport.latestMeasuredAt ? formatMeasurementTime(excelImport.latestMeasuredAt) : "2026-07-24 16:30"}</strong></div>
+          <div className="updated-at">資料時間 <strong>{excelImport.latestMeasuredAt ? formatMeasurementTime(excelImport.latestMeasuredAt) : "讀取中"}</strong></div>
         </div>
 
         <section className={`excel-import-panel ${excelImport.status}`} aria-labelledby="excel-import-title">
@@ -1067,18 +1170,19 @@ export default function Home() {
           <div className="excel-import-copy">
             <span className="panel-kicker">LUBRICATION DATA IMPORT</span>
             <h3 id="excel-import-title">匯入潤滑設備 Excel</h3>
-            <p>第一張工作表須包含：設備編號、量測時間、油量（L）、檢修人員、紀錄類型、補油量（L）。</p>
+            <p>先檢查預覽，再寫入 D1。完全相同資料會略過；同設備、同日期但內容不同時會整批阻擋。</p>
           </div>
           <div className="excel-import-actions">
             <a className="excel-template-link" href="/潤滑設備量測匯入範本.xlsx" download>下載 Excel 範本</a>
-            <button type="button" className="excel-import-button" onClick={() => excelInputRef.current?.click()} disabled={excelImport.status === "loading"}>
-              {excelImport.status === "loading" ? "讀取中…" : "選擇 Excel 匯入"}
+            <button type="button" className="excel-import-button" onClick={() => excelInputRef.current?.click()} disabled={excelImport.status === "loading" || excelImport.status === "saving"}>
+              {excelImport.status === "loading" ? "讀取中…" : pendingImport ? "重新選擇 Excel" : "選擇 Excel 匯入"}
             </button>
             <input ref={excelInputRef} className="visually-hidden-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleExcelImport} />
-            {excelImport.status === "success" ? <button type="button" className="excel-reset-button" onClick={resetExcelImport}>回復示範資料</button> : null}
+            {pendingImport ? <button type="button" className="excel-confirm-button" onClick={confirmExcelImport} disabled={excelImport.status === "saving"}>{excelImport.status === "saving" ? "寫入中…" : "確認寫入 D1"}</button> : null}
+            {pendingImport ? <button type="button" className="excel-reset-button" onClick={cancelPendingImport} disabled={excelImport.status === "saving"}>取消</button> : null}
           </div>
           <div className="excel-import-result" role="status" aria-live="polite">
-            <strong>{excelImport.status === "error" ? "需要修正" : excelImport.status === "success" ? "匯入完成" : excelImport.status === "loading" ? "正在處理" : "尚未匯入"}</strong>
+            <strong>{excelImport.status === "error" ? "需要修正" : excelImport.status === "success" ? "資料庫已同步" : excelImport.status === "preview" ? "等待確認" : excelImport.status === "saving" ? "正在寫入" : excelImport.status === "loading" ? "正在處理" : "尚未匯入"}</strong>
             <span>{excelImport.message}</span>
             {excelImport.errors?.length ? <ul>{excelImport.errors.map((error) => <li key={error}>{error}</li>)}</ul> : null}
           </div>

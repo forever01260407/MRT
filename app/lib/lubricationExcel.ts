@@ -11,6 +11,12 @@ export type LubricationRecord = {
   refillAmount: number | null;
 };
 
+export type LubricationWorkbookResult = {
+  records: LubricationRecord[];
+  duplicateCount: number;
+  sourceRowCount: number;
+};
+
 const expectedHeaders = ["設備編號", "量測時間", "油量（L）", "檢修人員", "紀錄類型", "補油量（L）"] as const;
 
 function normalizeHeader(value: unknown) {
@@ -72,7 +78,16 @@ export class LubricationImportError extends Error {
   }
 }
 
-export function parseLubricationRows(rows: unknown[][]): LubricationRecord[] {
+function recordsEqual(left: LubricationRecord, right: LubricationRecord) {
+  return left.deviceId === right.deviceId
+    && left.measuredAt === right.measuredAt
+    && left.oilLevel === right.oilLevel
+    && left.inspector === right.inspector
+    && left.recordType === right.recordType
+    && left.refillAmount === right.refillAmount;
+}
+
+export function parseLubricationRows(rows: unknown[][]): LubricationWorkbookResult {
   const nonEmptyRows = rows.filter((row) => row.some((cell) => String(cell ?? "").trim() !== ""));
   if (!nonEmptyRows.length) throw new LubricationImportError(["Excel 第一張工作表沒有資料。"]);
 
@@ -85,7 +100,8 @@ export function parseLubricationRows(rows: unknown[][]): LubricationRecord[] {
 
   const errors: string[] = [];
   const records: LubricationRecord[] = [];
-  const uniqueKeys = new Set<string>();
+  const recordsByKey = new Map<string, LubricationRecord>();
+  let duplicateCount = 0;
 
   nonEmptyRows.slice(1).forEach((row, dataIndex) => {
     const rowNumber = dataIndex + 2;
@@ -106,26 +122,37 @@ export function parseLubricationRows(rows: unknown[][]): LubricationRecord[] {
 
     if (!deviceId || !measuredAt || oilLevel === null || oilLevel < 0 || !inspector || (recordTypeText !== "量測" && recordTypeText !== "補油")) return;
 
-    const uniqueKey = `${deviceId}|${measuredAt}`;
-    if (uniqueKeys.has(uniqueKey)) {
-      errors.push(`第 ${rowNumber} 列：${deviceId} 在 ${measuredAt.replace("T", " ").slice(0, 16)} 已有重複紀錄。`);
-      return;
-    }
-    uniqueKeys.add(uniqueKey);
-    records.push({
+    const record: LubricationRecord = {
       deviceId,
       measuredAt,
       oilLevel: Number(oilLevel.toFixed(2)),
       inspector,
       recordType: recordTypeText,
       refillAmount: recordTypeText === "補油" && refillAmount !== null ? Number(refillAmount.toFixed(2)) : null,
-    });
+    };
+    const uniqueKey = `${deviceId}|${measuredAt}`;
+    const previousRecord = recordsByKey.get(uniqueKey);
+    if (previousRecord) {
+      if (recordsEqual(previousRecord, record)) {
+        duplicateCount += 1;
+        records.push(record);
+      } else {
+        errors.push(`第 ${rowNumber} 列：${deviceId} 在 ${measuredAt.replace("T", " ").slice(0, 16)} 出現內容不同的重複紀錄。`);
+      }
+      return;
+    }
+    recordsByKey.set(uniqueKey, record);
+    records.push(record);
   });
 
   if (errors.length) throw new LubricationImportError(errors.slice(0, 12));
   if (!records.length) throw new LubricationImportError(["Excel 沒有可匯入的潤滑紀錄。"]);
 
-  return records.sort((a, b) => a.deviceId.localeCompare(b.deviceId) || a.measuredAt.localeCompare(b.measuredAt));
+  return {
+    records: records.sort((a, b) => a.deviceId.localeCompare(b.deviceId) || a.measuredAt.localeCompare(b.measuredAt)),
+    duplicateCount,
+    sourceRowCount: nonEmptyRows.length - 1,
+  };
 }
 
 export async function readLubricationWorkbook(file: File) {
