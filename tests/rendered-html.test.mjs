@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function render() {
+async function render(pathname = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
-    new Request("http://localhost/", {
+    new Request(`http://localhost${pathname}`, {
       headers: { accept: "text/html" },
     }),
     {
@@ -33,9 +33,34 @@ test("server-renders the rail lubrication monitoring dashboard", async () => {
   assert.match(html, /匯入潤滑設備 Excel/);
   assert.match(html, /現場登記/);
   assert.match(html, /登記現場量測/);
+  assert.match(html, /Monitor Area/);
+  assert.match(html, /Monitor 完整紀錄/);
   assert.match(html, /固定潤滑設備/);
   assert.match(html, /MOK 10 · LB 10/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
+});
+
+test("server-renders the complete append-only record monitor", async () => {
+  const response = await render("/monitor");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /完整紀錄 Monitor/);
+  assert.match(html, /原始資料不會被覆蓋/);
+  assert.match(html, /全部量測與補油紀錄/);
+  assert.match(html, /更正會新增版本/);
+});
+
+test("stores corrections as immutable measurement revisions", async () => {
+  const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
+  const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
+
+  assert.match(route, /export async function PATCH/);
+  assert.match(route, /INSERT INTO measurement_revisions/);
+  assert.match(route, /correctionReason/);
+  assert.doesNotMatch(route, /UPDATE measurements SET/);
+  assert.match(schema, /measurementRevisions/);
+  assert.match(schema, /revisionNo/);
 });
 
 test("provides authenticated manual field registration backed by D1", async () => {

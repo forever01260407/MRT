@@ -1297,6 +1297,7 @@ export default function Home() {
           <a href="/" className="nav-item active" aria-current="page">潤滑設備總覽</a>
           <a href="/wear" className="nav-item">正面軌道總覽</a>
           <a href="/side-wear" className="nav-item">側面軌道總覽</a>
+          <a href="/monitor" className="nav-item">Monitor 完整紀錄</a>
         </nav>
         <div className="sync-state"><span className="pulse-dot"></span>{excelImport.status === "success" ? "D1 永久資料庫已同步" : excelImport.status === "loading" || excelImport.status === "saving" ? "資料庫同步中" : "資料庫等待確認"}</div>
       </header>
@@ -1308,7 +1309,14 @@ export default function Home() {
             <h2>從軌道線段直接定位設備</h2>
             <p>區間長度依設備數量自動配置；點軌道查看單台設備，再勾選同區間設備即可在一張圖比較多條曲線。</p>
           </div>
-          <div className="updated-at">資料時間 <strong>{excelImport.latestMeasuredAt ? formatMeasurementTime(excelImport.latestMeasuredAt) : "讀取中"}</strong></div>
+          <div className="page-heading-side">
+            <div className="updated-at">資料時間 <strong>{excelImport.latestMeasuredAt ? formatMeasurementTime(excelImport.latestMeasuredAt) : "讀取中"}</strong></div>
+            <a className="mini-monitor-link" href="/monitor">
+              <span className="mini-monitor-dot" aria-hidden="true"></span>
+              <span><strong>Monitor Area</strong><small>查看全部紀錄與更正歷程</small></span>
+              <b aria-hidden="true">→</b>
+            </a>
+          </div>
         </div>
 
         <div className="data-entry-grid">

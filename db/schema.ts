@@ -30,3 +30,25 @@ export const measurements = sqliteTable("measurements", {
   check("measurements_oil_level_nonnegative", sql`${table.oilLevel} >= 0`),
   check("measurements_record_type_valid", sql`${table.recordType} IN ('量測', '補油')`),
 ]);
+
+export const measurementRevisions = sqliteTable("measurement_revisions", {
+  id: text("id").primaryKey(),
+  measurementId: text("measurement_id").notNull().references(() => measurements.id),
+  revisionNo: integer("revision_no").notNull(),
+  deviceId: text("device_id").notNull(),
+  measuredAt: text("measured_at").notNull(),
+  oilLevel: real("oil_level").notNull(),
+  inspector: text("inspector").notNull(),
+  recordType: text("record_type").notNull(),
+  refillAmount: real("refill_amount"),
+  correctionReason: text("correction_reason").notNull(),
+  correctedBy: text("corrected_by").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("measurement_revisions_measurement_revision_uidx").on(table.measurementId, table.revisionNo),
+  index("idx_measurement_revisions_measurement_id").on(table.measurementId),
+  index("idx_measurement_revisions_created_at").on(table.createdAt),
+  check("measurement_revisions_oil_level_nonnegative", sql`${table.oilLevel} >= 0`),
+  check("measurement_revisions_record_type_valid", sql`${table.recordType} IN ('量測', '補油')`),
+]);

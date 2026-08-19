@@ -2,10 +2,10 @@ import { getD1 } from "../../../db";
 import { getChatGPTUser } from "../../chatgpt-auth";
 import { initialLubricationRecords } from "../../lib/initialLubricationRecords";
 import type { LubricationRecord, LubricationRecordType } from "../../lib/lubricationExcel";
+import type { LubricationRevision, MonitoredLubricationRecord } from "../../lib/lubricationMonitor";
 
 const INITIAL_BATCH_ID = "initial-excel-2026-08-19";
 const MAX_IMPORT_RECORDS = 500;
-const LOOKUP_CHUNK_SIZE = 50;
 
 type StoredMeasurementRow = {
   id: string;
@@ -15,6 +15,35 @@ type StoredMeasurementRow = {
   inspector: string;
   record_type: LubricationRecordType;
   refill_amount: number | null;
+};
+
+type StoredMonitorMeasurementRow = StoredMeasurementRow & {
+  created_by: string;
+  created_at: string;
+  file_name: string;
+};
+
+type StoredRevisionRow = {
+  id: string;
+  measurement_id: string;
+  revision_no: number;
+  device_id: string;
+  measured_at: string;
+  oil_level: number;
+  inspector: string;
+  record_type: LubricationRecordType;
+  refill_amount: number | null;
+  correction_reason: string;
+  corrected_by: string;
+  created_by: string;
+  created_at: string;
+};
+
+type CorrectionPayload = {
+  measurementId: string;
+  correctedBy: string;
+  correctionReason: string;
+  record: LubricationRecord;
 };
 
 type ImportConflict = {
@@ -151,6 +180,29 @@ function parseImportPayload(value: unknown) {
   };
 }
 
+function parseCorrectionPayload(value: unknown): CorrectionPayload {
+  if (!value || typeof value !== "object") {
+    throw new ImportValidationError(["更正內容不是有效的 JSON 物件。"]);
+  }
+
+  const payload = value as Record<string, unknown>;
+  const measurementId = String(payload.measurementId ?? "").trim();
+  const correctedBy = String(payload.correctedBy ?? "").trim();
+  const correctionReason = String(payload.correctionReason ?? "").trim();
+  const errors: string[] = [];
+  if (!measurementId || measurementId.length > 180) errors.push("缺少要更正的紀錄 ID。");
+  if (!correctedBy || correctedBy.length > 100) errors.push("更正人姓名為必填，且不得超過 100 字。");
+  if (!correctionReason || correctionReason.length > 500) errors.push("更正原因為必填，且不得超過 500 字。");
+  if (errors.length) throw new ImportValidationError(errors);
+
+  return {
+    measurementId,
+    correctedBy,
+    correctionReason,
+    record: normalizeRecord(payload.record, 0),
+  };
+}
+
 function rowToRecord(row: StoredMeasurementRow): LubricationRecord {
   return {
     deviceId: row.device_id,
@@ -159,6 +211,29 @@ function rowToRecord(row: StoredMeasurementRow): LubricationRecord {
     inspector: row.inspector,
     recordType: row.record_type,
     refillAmount: row.refill_amount,
+  };
+}
+
+function revisionRowToRecord(row: StoredRevisionRow): LubricationRecord {
+  return {
+    deviceId: row.device_id,
+    measuredAt: row.measured_at,
+    oilLevel: row.oil_level,
+    inspector: row.inspector,
+    recordType: row.record_type,
+    refillAmount: row.refill_amount,
+  };
+}
+
+function revisionRowToRevision(row: StoredRevisionRow): LubricationRevision {
+  return {
+    id: row.id,
+    revisionNo: row.revision_no,
+    ...revisionRowToRecord(row),
+    correctionReason: row.correction_reason,
+    correctedBy: row.corrected_by,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
   };
 }
 
@@ -191,9 +266,27 @@ async function initializeDatabase(d1: D1Database) {
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS measurement_revisions (
+      id TEXT PRIMARY KEY NOT NULL,
+      measurement_id TEXT NOT NULL REFERENCES measurements(id),
+      revision_no INTEGER NOT NULL,
+      device_id TEXT NOT NULL,
+      measured_at TEXT NOT NULL,
+      oil_level REAL NOT NULL CHECK (oil_level >= 0),
+      inspector TEXT NOT NULL,
+      record_type TEXT NOT NULL CHECK (record_type IN ('量測', '補油')),
+      refill_amount REAL,
+      correction_reason TEXT NOT NULL,
+      corrected_by TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS measurements_device_measured_at_uidx ON measurements (device_id, measured_at)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurements_measured_at ON measurements (measured_at)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurements_import_batch_id ON measurements (import_batch_id)"),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS measurement_revisions_measurement_revision_uidx ON measurement_revisions (measurement_id, revision_no)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurement_revisions_measurement_id ON measurement_revisions (measurement_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurement_revisions_created_at ON measurement_revisions (created_at)"),
   ]);
 
   const initialBatch = await d1.prepare("SELECT id FROM import_batches WHERE id = ? LIMIT 1")
@@ -239,25 +332,68 @@ async function ensureDatabase(d1: D1Database) {
 }
 
 async function listMeasurements(d1: D1Database) {
-  const result = await d1.prepare(`SELECT id, device_id, measured_at, oil_level, inspector, record_type, refill_amount
-    FROM measurements
-    ORDER BY measured_at ASC, device_id ASC`).all<StoredMeasurementRow>();
-  return result.results.map(rowToRecord);
+  const monitored = await listMonitoredMeasurements(d1);
+  return monitored
+    .map((item) => item.current)
+    .sort((left, right) => left.measuredAt.localeCompare(right.measuredAt) || left.deviceId.localeCompare(right.deviceId, "en", { numeric: true }));
 }
 
-async function findExistingMeasurements(d1: D1Database, records: LubricationRecord[]) {
+async function listRevisionRows(d1: D1Database) {
+  const result = await d1.prepare(`SELECT id, measurement_id, revision_no, device_id, measured_at, oil_level,
+      inspector, record_type, refill_amount, correction_reason, corrected_by, created_by, created_at
+    FROM measurement_revisions
+    ORDER BY measurement_id ASC, revision_no ASC`).all<StoredRevisionRow>();
+  return result.results;
+}
+
+async function listMonitoredMeasurements(d1: D1Database): Promise<MonitoredLubricationRecord[]> {
+  const [measurementResult, revisionRows] = await Promise.all([
+    d1.prepare(`SELECT m.id, m.device_id, m.measured_at, m.oil_level, m.inspector, m.record_type,
+        m.refill_amount, m.created_by, m.created_at, b.file_name
+      FROM measurements m
+      JOIN import_batches b ON b.id = m.import_batch_id
+      ORDER BY m.measured_at DESC, m.device_id ASC`).all<StoredMonitorMeasurementRow>(),
+    listRevisionRows(d1),
+  ]);
+  const revisionsByMeasurement = new Map<string, LubricationRevision[]>();
+  revisionRows.forEach((row) => {
+    const revisions = revisionsByMeasurement.get(row.measurement_id) ?? [];
+    revisions.push(revisionRowToRevision(row));
+    revisionsByMeasurement.set(row.measurement_id, revisions);
+  });
+
+  return measurementResult.results.map((row) => {
+    const original = rowToRecord(row);
+    const revisions = revisionsByMeasurement.get(row.id) ?? [];
+    const currentRevision = revisions.at(-1);
+    return {
+      id: row.id,
+      original,
+      current: currentRevision ? {
+        deviceId: currentRevision.deviceId,
+        measuredAt: currentRevision.measuredAt,
+        oilLevel: currentRevision.oilLevel,
+        inspector: currentRevision.inspector,
+        recordType: currentRevision.recordType,
+        refillAmount: currentRevision.refillAmount,
+      } : original,
+      status: revisions.length ? "已更正" : "有效",
+      sourceType: row.file_name.startsWith("現場登記-") ? "現場登記" : "Excel 匯入",
+      sourceName: row.file_name,
+      createdBy: row.created_by,
+      createdAt: row.created_at,
+      revisions,
+    };
+  });
+}
+
+async function findExistingMeasurements(d1: D1Database, _records: LubricationRecord[]) {
   const existing = new Map<string, LubricationRecord>();
-  for (let offset = 0; offset < records.length; offset += LOOKUP_CHUNK_SIZE) {
-    const chunk = records.slice(offset, offset + LOOKUP_CHUNK_SIZE);
-    const results = await d1.batch<StoredMeasurementRow>(chunk.map((record) => d1
-      .prepare(`SELECT id, device_id, measured_at, oil_level, inspector, record_type, refill_amount
-        FROM measurements WHERE device_id = ? AND measured_at = ? LIMIT 1`)
-      .bind(record.deviceId, record.measuredAt)));
-    results.forEach((result) => {
-      const row = result.results[0];
-      if (row) existing.set(recordKey(rowToRecord(row)), rowToRecord(row));
-    });
-  }
+  const monitored = await listMonitoredMeasurements(d1);
+  monitored.forEach((item) => {
+    existing.set(recordKey(item.original), item.current);
+    existing.set(recordKey(item.current), item.current);
+  });
   return existing;
 }
 
@@ -266,10 +402,18 @@ function conflictMessage(conflict: ImportConflict) {
   return `${conflict.incoming.deviceId}｜${date} 已有 ${conflict.existing.oilLevel} L，Excel 為 ${conflict.incoming.oilLevel} L；為避免覆蓋歷史資料，本次未寫入。`;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const d1 = await getD1();
     await ensureDatabase(d1);
+    if (new URL(request.url).searchParams.get("view") === "monitor") {
+      const records = await listMonitoredMeasurements(d1);
+      return Response.json({
+        records,
+        count: records.length,
+        revisionCount: records.reduce((sum, item) => sum + item.revisions.length, 0),
+      });
+    }
     const records = await listMeasurements(d1);
     return Response.json({ records, count: records.length, latestMeasuredAt: records.at(-1)?.measuredAt ?? null });
   } catch (error) {
@@ -350,6 +494,77 @@ export async function POST(request: Request) {
     }
     return Response.json(
       { error: error instanceof Error ? error.message : "Excel 無法寫入永久資料庫。" },
+      { status: 500 },
+    );
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const user = await getChatGPTUser();
+    if (!user && !isLocalRequest(request)) {
+      return Response.json({ error: "目前連線無法寫入更正紀錄。" }, { status: 401 });
+    }
+
+    const payload = parseCorrectionPayload(await request.json());
+    const d1 = await getD1();
+    await ensureDatabase(d1);
+    const monitored = await listMonitoredMeasurements(d1);
+    const target = monitored.find((item) => item.id === payload.measurementId);
+    if (!target) {
+      return Response.json({ error: "找不到要更正的原始紀錄。" }, { status: 404 });
+    }
+    if (recordsEqual(target.current, payload.record)) {
+      return Response.json({ error: "更正內容與目前有效資料完全相同，因此未新增版本。" }, { status: 400 });
+    }
+
+    const incomingKey = recordKey(payload.record);
+    const collision = monitored.find((item) => item.id !== target.id && (
+      recordKey(item.original) === incomingKey || recordKey(item.current) === incomingKey
+    ));
+    if (collision) {
+      return Response.json({
+        error: `${payload.record.deviceId}｜${payload.record.measuredAt.slice(0, 10)} 已屬於另一筆紀錄，請再確認設備與日期。`,
+      }, { status: 409 });
+    }
+
+    const revisionNo = (target.revisions.at(-1)?.revisionNo ?? 0) + 1;
+    const actor = user?.email ?? "local-development";
+    const createdAt = new Date().toISOString();
+    await d1.prepare(`INSERT INTO measurement_revisions
+      (id, measurement_id, revision_no, device_id, measured_at, oil_level, inspector, record_type,
+       refill_amount, correction_reason, corrected_by, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(
+        crypto.randomUUID(),
+        target.id,
+        revisionNo,
+        payload.record.deviceId,
+        payload.record.measuredAt,
+        payload.record.oilLevel,
+        payload.record.inspector,
+        payload.record.recordType,
+        payload.record.refillAmount,
+        payload.correctionReason,
+        payload.correctedBy,
+        actor,
+        createdAt,
+      )
+      .run();
+
+    const records = await listMonitoredMeasurements(d1);
+    return Response.json({
+      records,
+      count: records.length,
+      revisionCount: records.reduce((sum, item) => sum + item.revisions.length, 0),
+      correctedId: target.id,
+    });
+  } catch (error) {
+    if (error instanceof ImportValidationError) {
+      return Response.json({ error: "更正資料驗證失敗。", details: error.details }, { status: 400 });
+    }
+    return Response.json(
+      { error: error instanceof Error ? error.message : "更正紀錄無法寫入永久資料庫。" },
       { status: 500 },
     );
   }

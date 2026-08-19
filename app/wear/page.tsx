@@ -596,6 +596,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
           <a href="/" className="nav-item">潤滑設備總覽</a>
           <a href="/wear" className={`nav-item ${mode === "tread" ? "active" : ""}`} aria-current={mode === "tread" ? "page" : undefined}>正面軌道總覽</a>
           <a href="/side-wear" className={`nav-item ${mode === "side" ? "active" : ""}`} aria-current={mode === "side" ? "page" : undefined}>側面軌道總覽</a>
+          <a href="/monitor" className="nav-item">Monitor 完整紀錄</a>
         </nav>
         <div className="sync-state"><span className="pulse-dot"></span>上／下行 · {config.measurement} · 門檻已設定</div>
       </header>
