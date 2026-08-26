@@ -66,6 +66,10 @@ export default function MonitorPage() {
   const [editing, setEditing] = useState<MonitoredLubricationRecord | null>(null);
   const [correction, setCorrection] = useState<CorrectionForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deletingRecord, setDeletingRecord] = useState<MonitoredLubricationRecord | null>(null);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [feedback, setFeedback] = useState("");
 
   useEffect(() => {
@@ -188,6 +192,54 @@ export default function MonitorPage() {
     }
   };
 
+  const openDelete = (item: MonitoredLubricationRecord) => {
+    setDeletingRecord(item);
+    setDeletePassword("");
+    setDeleteError("");
+    setFeedback("");
+  };
+
+  const closeDelete = () => {
+    if (deleting) return;
+    setDeletingRecord(null);
+    setDeletePassword("");
+    setDeleteError("");
+  };
+
+  const submitDelete = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!deletingRecord) return;
+    if (!deletePassword.trim()) {
+      setDeleteError("請輸入刪除密碼。");
+      return;
+    }
+
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      const response = await fetch("/api/lubrication", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ measurementId: deletingRecord.id, password: deletePassword.trim() }),
+      });
+      const payload = await response.json() as MonitorPayload & { error?: string; details?: string[] };
+      if (!response.ok || !payload.records) {
+        throw new Error(payload.details?.[0] ?? payload.error ?? "紀錄刪除失敗。");
+      }
+
+      const deletedSummary = recordSummary(deletingRecord.current);
+      setRecords(payload.records);
+      setExpandedId((current) => current === deletingRecord.id ? null : current);
+      setDeletingRecord(null);
+      setDeletePassword("");
+      setFeedback(`${deletedSummary} 已永久刪除。`);
+    } catch (submitError) {
+      setDeleteError(submitError instanceof Error ? submitError.message : "紀錄刪除失敗。");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <main className="app-shell monitor-page">
       <header className="topbar">
@@ -211,14 +263,14 @@ export default function MonitorPage() {
           <div>
             <p className="eyebrow dark">RECORD MONITOR · APPEND-ONLY HISTORY</p>
             <h2>完整紀錄 Monitor</h2>
-            <p>保留所有原始值與更正版本；儀表板只採用每筆紀錄的最新有效值。</p>
+            <p>更正時保留原始值與所有版本；儀表板只採用每筆紀錄的最新有效值。</p>
           </div>
           <a className="monitor-back-link" href="/">← 回到潤滑設備總覽</a>
         </div>
 
         <section className="monitor-safety-note" aria-label="資料安全說明">
           <span aria-hidden="true">◎</span>
-          <div><strong>原始資料不會被覆蓋</strong><p>更正會新增版本，並記錄更正人、原因與時間；第一階段暫不區分角色權限。</p></div>
+          <div><strong>更正會保留原始資料</strong><p>更正會新增版本，並記錄更正人、原因與時間；永久刪除則必須通過密碼確認。</p></div>
         </section>
 
         <section className="monitor-summary-grid" aria-label="紀錄摘要">
@@ -263,7 +315,7 @@ export default function MonitorPage() {
                       <td>{item.current.inspector}</td>
                       <td><span className="monitor-source">{item.sourceType}</span></td>
                       <td>{formatDateTime(item.createdAt)}</td>
-                      <td><div className="monitor-row-actions"><button type="button" onClick={() => setExpandedId(expanded ? null : item.id)} aria-expanded={expanded}>{expanded ? "收起" : "查看歷程"}</button><button type="button" className="correct" onClick={() => openCorrection(item)}>更正</button></div></td>
+                      <td><div className="monitor-row-actions"><button type="button" onClick={() => setExpandedId(expanded ? null : item.id)} aria-expanded={expanded}>{expanded ? "收起" : "查看歷程"}</button><button type="button" className="correct" onClick={() => openCorrection(item)}>更正</button><button type="button" className="delete" onClick={() => openDelete(item)}>刪除</button></div></td>
                     </tr>,
                     expanded ? <tr className="monitor-history-row" key={`${item.id}:history`}><td colSpan={10}>
                       <div className="monitor-history-heading"><div><strong>{item.current.deviceId} 完整歷程</strong><span>原始紀錄 ID：{item.id}</span></div><button type="button" onClick={() => openCorrection(item)}>＋ 新增更正版本</button></div>
@@ -303,6 +355,18 @@ export default function MonitorPage() {
             </div>
             {feedback ? <div className="manual-entry-error" role="alert">{feedback}</div> : null}
             <footer className="manual-entry-form-actions"><button type="button" className="manual-entry-cancel" onClick={() => { setEditing(null); setCorrection(null); setFeedback(""); }} disabled={saving}>取消</button><button type="submit" className="manual-entry-submit" disabled={saving}>{saving ? "正在保留新版本…" : "確認更正並保留原始值"}</button></footer>
+          </form>
+        </section>
+      </div> : null}
+
+      {deletingRecord ? <div className="manual-entry-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDelete(); }}>
+        <section className="manual-entry-modal monitor-delete-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description">
+          <header className="manual-entry-modal-header"><div><span className="panel-kicker">PERMANENT DELETE</span><h3 id="delete-title" className="monitor-delete-title"><span aria-hidden="true">×</span>刪除紀錄</h3><p id="delete-description">刪除後會立即從 D1 移除，無法復原。</p></div><button type="button" className="manual-entry-close" onClick={closeDelete} disabled={deleting} aria-label="關閉刪除視窗">×</button></header>
+          <form className="manual-entry-form" onSubmit={submitDelete}>
+            <div className="monitor-delete-warning"><span>即將刪除</span><strong>{recordSummary(deletingRecord.current)}</strong><p>現場人員：{deletingRecord.current.inspector}｜來源：{deletingRecord.sourceType}</p></div>
+            <label className="manual-entry-field"><span>刪除密碼 <b>*</b></span><input type="password" inputMode="numeric" autoComplete="off" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} disabled={deleting} placeholder="請輸入刪除密碼" autoFocus required /></label>
+            {deleteError ? <div className="manual-entry-error" role="alert">{deleteError}</div> : null}
+            <footer className="manual-entry-form-actions"><button type="button" className="manual-entry-cancel" onClick={closeDelete} disabled={deleting}>取消</button><button type="submit" className="monitor-delete-confirm" disabled={deleting}>{deleting ? "正在刪除…" : "確認永久刪除"}</button></footer>
           </form>
         </section>
       </div> : null}

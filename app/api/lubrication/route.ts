@@ -6,6 +6,7 @@ import type { LubricationRevision, MonitoredLubricationRecord } from "../../lib/
 
 const INITIAL_BATCH_ID = "initial-excel-2026-08-19";
 const MAX_IMPORT_RECORDS = 500;
+const DELETE_PASSWORD = "0407";
 
 type StoredMeasurementRow = {
   id: string;
@@ -44,6 +45,11 @@ type CorrectionPayload = {
   correctedBy: string;
   correctionReason: string;
   record: LubricationRecord;
+};
+
+type DeletePayload = {
+  measurementId: string;
+  password: string;
 };
 
 type ImportConflict = {
@@ -201,6 +207,21 @@ function parseCorrectionPayload(value: unknown): CorrectionPayload {
     correctionReason,
     record: normalizeRecord(payload.record, 0),
   };
+}
+
+function parseDeletePayload(value: unknown): DeletePayload {
+  if (!value || typeof value !== "object") {
+    throw new ImportValidationError(["刪除內容不是有效的 JSON 物件。"]);
+  }
+
+  const payload = value as Record<string, unknown>;
+  const measurementId = String(payload.measurementId ?? "").trim();
+  const password = String(payload.password ?? "").trim();
+  const errors: string[] = [];
+  if (!measurementId || measurementId.length > 180) errors.push("缺少要刪除的紀錄 ID。");
+  if (!password) errors.push("請輸入刪除密碼。");
+  if (errors.length) throw new ImportValidationError(errors);
+  return { measurementId, password };
 }
 
 function rowToRecord(row: StoredMeasurementRow): LubricationRecord {
@@ -565,6 +586,49 @@ export async function PATCH(request: Request) {
     }
     return Response.json(
       { error: error instanceof Error ? error.message : "更正紀錄無法寫入永久資料庫。" },
+      { status: 500 },
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const user = await getChatGPTUser();
+    if (!user && !isLocalRequest(request)) {
+      return Response.json({ error: "目前連線無法刪除紀錄。" }, { status: 401 });
+    }
+
+    const payload = parseDeletePayload(await request.json());
+    if (payload.password !== DELETE_PASSWORD) {
+      return Response.json({ error: "刪除密碼錯誤。" }, { status: 403 });
+    }
+
+    const d1 = await getD1();
+    await ensureDatabase(d1);
+    const monitored = await listMonitoredMeasurements(d1);
+    const target = monitored.find((item) => item.id === payload.measurementId);
+    if (!target) {
+      return Response.json({ error: "找不到要刪除的紀錄。" }, { status: 404 });
+    }
+
+    await d1.batch([
+      d1.prepare("DELETE FROM measurement_revisions WHERE measurement_id = ?").bind(target.id),
+      d1.prepare("DELETE FROM measurements WHERE id = ?").bind(target.id),
+    ]);
+
+    const records = await listMonitoredMeasurements(d1);
+    return Response.json({
+      records,
+      count: records.length,
+      revisionCount: records.reduce((sum, item) => sum + item.revisions.length, 0),
+      deletedId: target.id,
+    });
+  } catch (error) {
+    if (error instanceof ImportValidationError) {
+      return Response.json({ error: "刪除資料驗證失敗。", details: error.details }, { status: 400 });
+    }
+    return Response.json(
+      { error: error instanceof Error ? error.message : "紀錄無法從永久資料庫刪除。" },
       { status: 500 },
     );
   }

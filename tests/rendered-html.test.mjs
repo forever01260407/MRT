@@ -46,10 +46,23 @@ test("server-renders the complete append-only record monitor", async () => {
   const html = await response.text();
 
   assert.match(html, /完整紀錄 Monitor/);
-  assert.match(html, /原始資料不會被覆蓋/);
+  assert.match(html, /更正會保留原始資料/);
   assert.match(html, /全部量測與補油紀錄/);
   assert.match(html, /更正會新增版本/);
   assert.match(html, /切換為 LB1 到 MOK10 的設備順序/);
+});
+
+test("requires the fixed password before permanently deleting a record", async () => {
+  const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/monitor/page.tsx", import.meta.url), "utf8");
+
+  assert.match(route, /const DELETE_PASSWORD = "0407"/);
+  assert.match(route, /export async function DELETE/);
+  assert.match(route, /payload\.password !== DELETE_PASSWORD/);
+  assert.ok(route.indexOf("DELETE FROM measurement_revisions") < route.indexOf("DELETE FROM measurements"));
+  assert.match(page, /method: "DELETE"/);
+  assert.match(page, /type="password"/);
+  assert.match(page, /確認永久刪除/);
 });
 
 test("sorts monitor records by natural device order on demand", async () => {
