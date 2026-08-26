@@ -293,6 +293,11 @@ button:focus-visible {
 .monitor-table-shell { overflow-x: auto; }
 .monitor-table { width: 100%; min-width: 1260px; border-collapse: collapse; color: var(--ink-soft); font-size: 11px; }
 .monitor-table th { padding: 10px 12px; color: var(--muted); background: #f3f6fa; text-align: left; font-size: 9px; font-weight: 900; letter-spacing: .035em; white-space: nowrap; }
+.monitor-sort-button { margin: -6px -8px; padding: 6px 8px; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 6px; color: inherit; background: transparent; font-size: inherit; font-weight: inherit; letter-spacing: inherit; cursor: pointer; }
+.monitor-sort-button span { color: #9aa5b5; font-size: 9px; letter-spacing: 0; }
+.monitor-sort-button:hover { color: var(--violet); background: var(--violet-soft); }
+.monitor-sort-button.active { color: var(--violet); background: var(--violet-soft); }
+.monitor-sort-button.active span { color: var(--violet); }
 .monitor-table td { padding: 11px 12px; border-top: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
 .monitor-table tbody > tr:not(.monitor-history-row):hover { background: #fafaff; }
 .monitor-table tbody > tr.corrected { background: #fffdf7; }

@@ -49,6 +49,16 @@ test("server-renders the complete append-only record monitor", async () => {
   assert.match(html, /原始資料不會被覆蓋/);
   assert.match(html, /全部量測與補油紀錄/);
   assert.match(html, /更正會新增版本/);
+  assert.match(html, /切換為 LB1 到 MOK10 的設備順序/);
+});
+
+test("sorts monitor records by natural device order on demand", async () => {
+  const page = await readFile(new URL("../app/monitor/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /Intl\.Collator\("en", \{ numeric: true/);
+  assert.match(page, /deviceCollator\.compare/);
+  assert.match(page, /setSortByDevice/);
+  assert.match(page, /LB → MOK/);
 });
 
 test("stores corrections as immutable measurement revisions", async () => {

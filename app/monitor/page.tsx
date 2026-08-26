@@ -21,6 +21,8 @@ const deviceOptions = [
   ...Array.from({ length: 10 }, (_, index) => `LB${index + 1}`),
 ];
 
+const deviceCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
 function formatDate(value: string) {
   return value.slice(0, 10).replaceAll("-", "/");
 }
@@ -59,6 +61,7 @@ export default function MonitorPage() {
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
+  const [sortByDevice, setSortByDevice] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<MonitoredLubricationRecord | null>(null);
   const [correction, setCorrection] = useState<CorrectionForm | null>(null);
@@ -100,9 +103,15 @@ export default function MonitorPage() {
         ].join(" ").toLocaleLowerCase("zh-TW");
         return searchable.includes(keyword);
       })
-      .sort((left, right) => right.current.measuredAt.localeCompare(left.current.measuredAt)
-        || right.createdAt.localeCompare(left.createdAt));
-  }, [deviceFilter, records, search, sourceFilter, statusFilter, typeFilter]);
+      .sort((left, right) => {
+        if (sortByDevice) {
+          const deviceOrder = deviceCollator.compare(left.current.deviceId, right.current.deviceId);
+          if (deviceOrder !== 0) return deviceOrder;
+        }
+        return right.current.measuredAt.localeCompare(left.current.measuredAt)
+          || right.createdAt.localeCompare(left.createdAt);
+      });
+  }, [deviceFilter, records, search, sortByDevice, sourceFilter, statusFilter, typeFilter]);
 
   const correctedCount = records.filter((item) => item.revisions.length > 0).length;
   const revisionCount = records.reduce((sum, item) => sum + item.revisions.length, 0);
@@ -237,7 +246,7 @@ export default function MonitorPage() {
 
           <div className="monitor-table-shell">
             <table className="monitor-table">
-              <thead><tr><th>狀態</th><th>設備</th><th>量測日期</th><th>油量</th><th>類型</th><th>補油量</th><th>現場人員</th><th>來源</th><th>登記時間</th><th>紀錄操作</th></tr></thead>
+              <thead><tr><th>狀態</th><th aria-sort={sortByDevice ? "ascending" : "none"}><button type="button" className={`monitor-sort-button ${sortByDevice ? "active" : ""}`} onClick={() => setSortByDevice((current) => !current)} aria-label={sortByDevice ? "取消設備排序，回到量測日期順序" : "切換為 LB1 到 MOK10 的設備順序"}>設備 <span>{sortByDevice ? "LB → MOK" : "↕"}</span></button></th><th>量測日期</th><th>油量</th><th>類型</th><th>補油量</th><th>現場人員</th><th>來源</th><th>登記時間</th><th>紀錄操作</th></tr></thead>
               <tbody>
                 {loading ? <tr><td colSpan={10} className="monitor-empty">正在從 D1 讀取完整紀錄…</td></tr> : null}
                 {!loading && !visibleRecords.length ? <tr><td colSpan={10} className="monitor-empty">找不到符合篩選條件的紀錄。</td></tr> : null}
