@@ -3,6 +3,12 @@ import { getChatGPTUser } from "../../chatgpt-auth";
 import { initialLubricationRecords } from "../../lib/initialLubricationRecords";
 import type { LubricationRecord, LubricationRecordType } from "../../lib/lubricationExcel";
 import type { LubricationRevision, MonitoredLubricationRecord } from "../../lib/lubricationMonitor";
+import {
+  enforceManualEntryRateLimit,
+  getTurnstileRuntimeEnv,
+  TurnstileRequestError,
+  verifyTurnstileToken,
+} from "../../lib/turnstile";
 
 const INITIAL_BATCH_ID = "initial-excel-2026-08-19";
 const MAX_IMPORT_RECORDS = 500;
@@ -57,6 +63,12 @@ type ImportConflict = {
   measuredAt: string;
   existing: LubricationRecord;
   incoming: LubricationRecord;
+};
+
+type ManualEntryPayload = {
+  submissionType: "manual";
+  turnstileToken: unknown;
+  record: unknown;
 };
 
 class ImportValidationError extends Error {
@@ -183,6 +195,25 @@ function parseImportPayload(value: unknown) {
     records: [...recordsByKey.values()],
     submittedCount: rawRecords.length,
     duplicateWithinFile,
+  };
+}
+
+function isManualEntryPayload(value: unknown): value is ManualEntryPayload {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && (value as Record<string, unknown>).submissionType === "manual",
+  );
+}
+
+function parseManualEntryPayload(value: ManualEntryPayload) {
+  const record = normalizeRecord(value.record, 0);
+  return {
+    fileName: `現場登記-${record.deviceId}-${record.measuredAt.slice(0, 10)}`,
+    fileHash: `anonymous-pov-${crypto.randomUUID()}`,
+    records: [record],
+    submittedCount: 1,
+    duplicateWithinFile: 0,
   };
 }
 
@@ -447,12 +478,26 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const requestBody = await request.json();
     const user = await getChatGPTUser();
-    if (!user && !isLocalRequest(request)) {
+    const isManualEntry = isManualEntryPayload(requestBody);
+    if (!isManualEntry && !user && !isLocalRequest(request)) {
       return Response.json({ error: "請先登入後再匯入 Excel。" }, { status: 401 });
     }
 
-    const payload = parseImportPayload(await request.json());
+    if (isManualEntry) {
+      const runtimeEnv = await getTurnstileRuntimeEnv();
+      await enforceManualEntryRateLimit(request, runtimeEnv);
+      await verifyTurnstileToken({
+        request,
+        runtimeEnv,
+        token: requestBody.turnstileToken,
+      });
+    }
+
+    const payload = isManualEntry
+      ? parseManualEntryPayload(requestBody)
+      : parseImportPayload(requestBody);
     const d1 = await getD1();
     await ensureDatabase(d1);
     const existing = await findExistingMeasurements(d1, payload.records);
@@ -479,7 +524,7 @@ export async function POST(request: Request) {
     }
 
     const batchId = crypto.randomUUID();
-    const actor = user?.email ?? "local-development";
+    const actor = isManualEntry ? "anonymous-pov" : user?.email ?? "local-development";
     await d1.batch([
       d1.prepare(`INSERT INTO import_batches
         (id, file_name, file_hash, submitted_count, inserted_count, duplicate_count, uploaded_by)
@@ -510,11 +555,14 @@ export async function POST(request: Request) {
       latestMeasuredAt: records.at(-1)?.measuredAt ?? null,
     });
   } catch (error) {
+    if (error instanceof TurnstileRequestError) {
+      return Response.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof ImportValidationError) {
-      return Response.json({ error: "匯入資料驗證失敗。", details: error.details }, { status: 400 });
+      return Response.json({ error: "提交資料驗證失敗。", details: error.details }, { status: 400 });
     }
     return Response.json(
-      { error: error instanceof Error ? error.message : "Excel 無法寫入永久資料庫。" },
+      { error: error instanceof Error ? error.message : "資料無法寫入永久資料庫。" },
       { status: 500 },
     );
   }

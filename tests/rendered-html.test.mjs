@@ -86,14 +86,37 @@ test("stores corrections as immutable measurement revisions", async () => {
   assert.match(schema, /revisionNo/);
 });
 
-test("provides authenticated manual field registration backed by D1", async () => {
+test("provides Turnstile-protected anonymous manual registration backed by D1", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
+  const turnstile = await readFile(new URL("../app/lib/turnstile.ts", import.meta.url), "utf8");
+  const viteConfig = await readFile(new URL("../vite.config.ts", import.meta.url), "utf8");
 
   assert.match(page, /手動登記現場量測值/);
   assert.match(page, /inspector:\s*manualEntry\.inspector\.trim\(\) \|\| "未指定"/);
   assert.match(page, /recordType:\s*manualEntry\.recordType/);
   assert.match(page, /fetch\("\/api\/lubrication"/);
+  assert.match(page, /submissionType:\s*"manual"/);
+  assert.match(page, /turnstileToken:\s*manualTurnstileToken/);
+  assert.match(page, /TurnstileWidget/);
   assert.match(page, /確認登錄並即時同步/);
+
+  assert.match(route, /isManualEntryPayload/);
+  assert.match(route, /enforceManualEntryRateLimit/);
+  assert.match(route, /verifyTurnstileToken/);
+  assert.match(route, /records:\s*\[record\]/);
+  assert.match(route, /submittedCount:\s*1/);
+  assert.match(route, /anonymous-pov/);
+  assert.match(route, /!isManualEntry && !user/);
+
+  assert.match(turnstile, /challenges\.cloudflare\.com\/turnstile\/v0\/siteverify/);
+  assert.match(turnstile, /result\.action !== MANUAL_ENTRY_TURNSTILE_ACTION/);
+  assert.match(turnstile, /result\.hostname !== requestUrl\.hostname/);
+  assert.match(turnstile, /AbortSignal\.timeout\(10_000\)/);
+  assert.match(viteConfig, /MANUAL_ENTRY_RATE_LIMITER/);
+  assert.match(viteConfig, /simple:\s*\{ limit: 5, period: 60/);
+  assert.match(viteConfig, /command === "serve"/);
+  assert.match(viteConfig, /keep_vars:\s*true/);
 });
 
 test("keeps complete imported history and enables chart navigation", async () => {

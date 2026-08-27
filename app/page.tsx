@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import { TurnstileWidget } from "./components/TurnstileWidget";
 import { calculateConsumptionBaseline, forecastOilLevel } from "./lib/consumptionBaseline";
 import { LubricationImportError, readLubricationWorkbook } from "./lib/lubricationExcel";
 import type { LubricationRecord } from "./lib/lubricationExcel";
@@ -638,8 +639,10 @@ export default function Home() {
   }));
   const [manualEntryFeedback, setManualEntryFeedback] = useState<ManualEntryFeedback>({
     status: "idle",
-    message: "登入後可將現場量測直接寫入 D1。",
+    message: "POV 開放免登入單筆登記，送出前會自動完成安全驗證。",
   });
+  const [manualTurnstileToken, setManualTurnstileToken] = useState<string | null>(null);
+  const [manualTurnstileResetKey, setManualTurnstileResetKey] = useState(0);
   const [forecastDate, setForecastDate] = useState(todayInTaipei);
   const [activeSegments, setActiveSegments] = useState<Segment[]>(segments);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
@@ -920,7 +923,9 @@ export default function Home() {
       recordType: "量測",
       refillAmount: "",
     });
-    setManualEntryFeedback({ status: "idle", message: "填寫完成後會立即同步至 D1 永久資料庫。" });
+    setManualTurnstileToken(null);
+    setManualTurnstileResetKey((current) => current + 1);
+    setManualEntryFeedback({ status: "idle", message: "免登入單筆登記；安全驗證完成後會立即同步至 D1。" });
     setIsManualEntryOpen(true);
   };
 
@@ -942,6 +947,10 @@ export default function Home() {
       setManualEntryFeedback({ status: "error", message: "補油紀錄必須填寫大於 0 的本次補油量。" });
       return;
     }
+    if (!manualTurnstileToken) {
+      setManualEntryFeedback({ status: "error", message: "安全驗證尚未完成，請稍候後再送出。" });
+      return;
+    }
 
     const record: LubricationRecord = {
       deviceId: manualEntry.deviceId,
@@ -958,9 +967,9 @@ export default function Home() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          fileName: `現場登記-${record.deviceId}-${manualEntry.measuredDate}`,
-          fileHash: `manual-${crypto.randomUUID()}`,
-          records: [record],
+          submissionType: "manual",
+          turnstileToken: manualTurnstileToken,
+          record,
         }),
       });
       const payload = await response.json() as {
@@ -1004,6 +1013,8 @@ export default function Home() {
         ? error.details
         : [error instanceof Error ? error.message : "現場紀錄無法寫入永久資料庫。"];
       setManualEntryFeedback({ status: "error", message: details[0] ?? "現場紀錄無法寫入永久資料庫。" });
+      setManualTurnstileToken(null);
+      setManualTurnstileResetKey((current) => current + 1);
     }
   };
 
@@ -1347,7 +1358,7 @@ export default function Home() {
             <div className="manual-entry-copy">
               <span className="panel-kicker">ON-SITE MEASUREMENT</span>
               <h3 id="manual-entry-panel-title">現場登記</h3>
-              <p>現場量測完成後直接登記，確認後即時寫入 D1 並更新監測畫面。</p>
+              <p>POV 期間免登入即可登記單筆量測；Cloudflare 安全驗證通過後即時寫入 D1。</p>
             </div>
             <button
               type="button"
@@ -1676,7 +1687,7 @@ export default function Home() {
                 <div>
                   <span className="panel-kicker">ON-SITE MEASUREMENT</span>
                   <h3 id="manual-entry-title"><span aria-hidden="true">＋</span>手動登記現場量測值</h3>
-                  <p id="manual-entry-description">確認後會立即寫入 D1；人員留白時自動記錄為「未指定」。</p>
+                  <p id="manual-entry-description">本 POV 不需登入；通過安全驗證後立即寫入 D1。人員留白時記錄為「未指定」。</p>
                 </div>
                 <button
                   type="button"
@@ -1776,14 +1787,19 @@ export default function Home() {
                   ) : <div className="manual-entry-type-note">量測紀錄只保存現場顯示油量。</div>}
                 </div>
 
+                <TurnstileWidget
+                  key={manualTurnstileResetKey}
+                  onTokenChange={setManualTurnstileToken}
+                />
+
                 {manualEntryFeedback.status === "error" ? (
                   <div className="manual-entry-error" role="alert">{manualEntryFeedback.message}</div>
                 ) : null}
 
                 <footer className="manual-entry-form-actions">
                   <button type="button" className="manual-entry-cancel" onClick={closeManualEntry} disabled={manualEntryFeedback.status === "saving"}>取消</button>
-                  <button type="submit" className="manual-entry-submit" disabled={manualEntryFeedback.status === "saving"}>
-                    {manualEntryFeedback.status === "saving" ? "同步中…" : "確認登錄並即時同步"}
+                  <button type="submit" className="manual-entry-submit" disabled={manualEntryFeedback.status === "saving" || !manualTurnstileToken}>
+                    {manualEntryFeedback.status === "saving" ? "同步中…" : manualTurnstileToken ? "確認登錄並即時同步" : "安全驗證中…"}
                   </button>
                 </footer>
               </form>
