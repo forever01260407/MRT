@@ -1,5 +1,10 @@
 import { getD1 } from "../../../db";
 import { getChatGPTUser } from "../../chatgpt-auth";
+import {
+  authorizeDeleteRequest,
+  DeleteAuthorizationError,
+  getDeleteAuthorizationRuntimeEnv,
+} from "../../lib/deleteAuthorization";
 import { initialLubricationRecords } from "../../lib/initialLubricationRecords";
 import type { LubricationRecord, LubricationRecordType } from "../../lib/lubricationExcel";
 import type { LubricationRevision, MonitoredLubricationRecord } from "../../lib/lubricationMonitor";
@@ -12,8 +17,6 @@ import {
 
 const INITIAL_BATCH_ID = "initial-excel-2026-08-19";
 const MAX_IMPORT_RECORDS = 500;
-const DELETE_PASSWORD = "0407";
-
 type StoredMeasurementRow = {
   id: string;
   device_id: string;
@@ -641,15 +644,12 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const user = await getChatGPTUser();
-    if (!user && !isLocalRequest(request)) {
-      return Response.json({ error: "目前連線無法刪除紀錄。" }, { status: 401 });
-    }
-
     const payload = parseDeletePayload(await request.json());
-    if (payload.password !== DELETE_PASSWORD) {
-      return Response.json({ error: "刪除密碼錯誤。" }, { status: 403 });
-    }
+    await authorizeDeleteRequest({
+      request,
+      runtimeEnv: await getDeleteAuthorizationRuntimeEnv(),
+      password: payload.password,
+    });
 
     const d1 = await getD1();
     await ensureDatabase(d1);
@@ -672,6 +672,9 @@ export async function DELETE(request: Request) {
       deletedId: target.id,
     });
   } catch (error) {
+    if (error instanceof DeleteAuthorizationError) {
+      return Response.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof ImportValidationError) {
       return Response.json({ error: "刪除資料驗證失敗。", details: error.details }, { status: 400 });
     }

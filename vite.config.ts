@@ -1,5 +1,5 @@
 import vinext from "vinext";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
 
@@ -16,7 +16,8 @@ const isCloudflareWorkersBuild = process.env.WORKERS_CI === "1";
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
-export default defineConfig(async ({ command }) => {
+export default defineConfig(async ({ command, mode }) => {
+  const localEnv = loadEnv(mode, process.cwd(), "");
   const localBindingConfig = {
     main: "./worker/index.ts",
     compatibility_flags: ["nodejs_compat"],
@@ -47,12 +48,20 @@ export default defineConfig(async ({ command }) => {
         namespace_id: "1001",
         simple: { limit: 5, period: 60 as const },
       },
+      {
+        name: "DELETE_RATE_LIMITER",
+        namespace_id: "1002",
+        simple: { limit: 5, period: 60 as const },
+      },
     ],
     ...(command === "serve"
       ? {
           vars: {
             TURNSTILE_SITE_KEY: TURNSTILE_TEST_SITE_KEY,
             TURNSTILE_SECRET_KEY: TURNSTILE_TEST_SECRET_KEY,
+            ...(localEnv.DELETE_PASSWORD
+              ? { DELETE_PASSWORD: localEnv.DELETE_PASSWORD }
+              : {}),
           },
         }
       : { keep_vars: true }),

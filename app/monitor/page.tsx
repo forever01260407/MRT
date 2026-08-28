@@ -364,7 +364,7 @@ export default function MonitorPage() {
           <header className="manual-entry-modal-header"><div><span className="panel-kicker">PERMANENT DELETE</span><h3 id="delete-title" className="monitor-delete-title"><span aria-hidden="true">×</span>刪除紀錄</h3><p id="delete-description">刪除後會立即從 D1 移除，無法復原。</p></div><button type="button" className="manual-entry-close" onClick={closeDelete} disabled={deleting} aria-label="關閉刪除視窗">×</button></header>
           <form className="manual-entry-form" onSubmit={submitDelete}>
             <div className="monitor-delete-warning"><span>即將刪除</span><strong>{recordSummary(deletingRecord.current)}</strong><p>現場人員：{deletingRecord.current.inspector}｜來源：{deletingRecord.sourceType}</p></div>
-            <label className="manual-entry-field"><span>刪除密碼 <b>*</b></span><input type="password" inputMode="numeric" autoComplete="off" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} disabled={deleting} placeholder="請輸入刪除密碼" autoFocus required /></label>
+            <label className="manual-entry-field"><span>刪除密碼 <b>*</b></span><input type="password" autoComplete="off" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} disabled={deleting} placeholder="請輸入刪除密碼" autoFocus required /></label>
             {deleteError ? <div className="manual-entry-error" role="alert">{deleteError}</div> : null}
             <footer className="manual-entry-form-actions"><button type="button" className="manual-entry-cancel" onClick={closeDelete} disabled={deleting}>取消</button><button type="submit" className="monitor-delete-confirm" disabled={deleting}>{deleting ? "正在刪除…" : "確認永久刪除"}</button></footer>
           </form>

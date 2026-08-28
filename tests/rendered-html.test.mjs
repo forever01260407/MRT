@@ -52,16 +52,27 @@ test("server-renders the complete append-only record monitor", async () => {
   assert.match(html, /切換為 LB1 到 MOK10 的設備順序/);
 });
 
-test("requires the fixed password before permanently deleting a record", async () => {
+test("requires a rate-limited runtime secret before permanently deleting a record", async () => {
   const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
   const page = await readFile(new URL("../app/monitor/page.tsx", import.meta.url), "utf8");
+  const authorization = await readFile(new URL("../app/lib/deleteAuthorization.ts", import.meta.url), "utf8");
+  const viteConfig = await readFile(new URL("../vite.config.ts", import.meta.url), "utf8");
+  const deleteHandler = route.slice(route.indexOf("export async function DELETE"));
 
-  assert.match(route, /const DELETE_PASSWORD = "0407"/);
   assert.match(route, /export async function DELETE/);
-  assert.match(route, /payload\.password !== DELETE_PASSWORD/);
+  assert.match(deleteHandler, /authorizeDeleteRequest/);
+  assert.doesNotMatch(deleteHandler, /getChatGPTUser/);
+  assert.doesNotMatch(route, /const DELETE_PASSWORD\s*=/);
+  assert.match(authorization, /DELETE_PASSWORD\?: string/);
+  assert.match(authorization, /DELETE_RATE_LIMITER/);
+  assert.match(authorization, /timingSafeEqual/);
+  assert.match(authorization, /permanent-delete:/);
+  assert.match(viteConfig, /name: "DELETE_RATE_LIMITER"/);
+  assert.match(viteConfig, /namespace_id: "1002"/);
   assert.ok(route.indexOf("DELETE FROM measurement_revisions") < route.indexOf("DELETE FROM measurements"));
   assert.match(page, /method: "DELETE"/);
   assert.match(page, /type="password"/);
+  assert.doesNotMatch(page, /inputMode="numeric"/);
   assert.match(page, /確認永久刪除/);
 });
 
