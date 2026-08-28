@@ -37,7 +37,22 @@ test("server-renders the rail lubrication monitoring dashboard", async () => {
   assert.doesNotMatch(html, /class="nav-item"[^>]*>Monitor 完整紀錄/);
   assert.match(html, /固定潤滑設備/);
   assert.match(html, /MOK 10 · LB 10/);
+  assert.match(html, /目前選取設備/);
+  assert.match(html, /當前流量/);
+  assert.match(html, /軸數尚未設定/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
+});
+
+test("keeps the lubrication map summary synchronized with the selected device", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /renderSelectedDeviceMapCard/);
+  assert.match(page, /selectedDevice\.direction === "up" \? "上行" : "下行"/);
+  assert.match(page, /目前選取設備/);
+  assert.match(page, /<dt>當前流量<\/dt>/);
+  assert.match(page, /<dt>軸數<\/dt>/);
+  assert.match(page, /aria-label="軸數尚未設定"/);
+  assert.match(page, /renderSelectedDeviceMapCard\(true\)/);
 });
 
 test("server-renders the complete append-only record monitor", async () => {

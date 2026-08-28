@@ -1235,6 +1235,41 @@ export default function Home() {
     );
   });
 
+  const renderSelectedDeviceMapCard = (expanded = false) => {
+    if (!selectedDevice) return null;
+
+    const hasData = hasDeviceData(selectedDevice);
+    const selectedStatus = hasData ? selectedDevice.status : "unknown";
+    const direction = selectedDevice.direction === "up" ? "上行" : "下行";
+    const fromStation = stations[selectedSegment.from];
+    const toStation = stations[selectedSegment.to];
+
+    return (
+      <aside
+        key={`${selectedSegment.id}-${selectedDevice.id}`}
+        className={`selected-rail-map-card selected-device-map-card ${expanded ? "expanded" : ""}`}
+        aria-live="polite"
+        aria-label={`目前選取設備 ${selectedDevice.id}，${fromStation.name}至${toStation.name}`}
+      >
+        <header>
+          <p>目前選取設備</p>
+          <div>
+            <strong>{selectedDevice.id}</strong>
+            <span className={`selected-map-status ${selectedStatus}`}>{hasData ? statusText[selectedStatus] : "無資料"}</span>
+          </div>
+          <small>固定潤滑設備 · {direction}</small>
+        </header>
+        <dl>
+          <div><dt>方向</dt><dd>{direction}</dd></div>
+          <div><dt>軸數</dt><dd className="selected-map-empty-value" aria-label="軸數尚未設定"><span aria-hidden="true">&nbsp;</span></dd></div>
+          <div className="selected-map-location"><dt>站間</dt><dd><span>{fromStation.id} {fromStation.name}</span><i>→</i><span>{toStation.id} {toStation.name}</span></dd></div>
+          <div><dt>當前流量</dt><dd>{hasData ? `${selectedDevice.value} L` : "無資料"}</dd></div>
+          <div><dt>狀態</dt><dd className={selectedStatus}>{hasData ? statusText[selectedStatus] : "無資料"}</dd></div>
+        </dl>
+      </aside>
+    );
+  };
+
   const renderTopology = (activeLayout: RouteLayout) => (
     <>
       {activeSegments.map((segment) => {
@@ -1408,6 +1443,7 @@ export default function Home() {
             <div className="topology-stage" ref={topologyRef} role="group" aria-label="環狀線 Y19 至 Y6 設備權重 L 型軌道圖">
               <div className="map-orientation"><span>北</span><i></i></div>
               {renderTopology(layout)}
+              {renderSelectedDeviceMapCard()}
             </div>
 
             <div className="mobile-route-list" aria-label="環狀線行動版設備列表">
@@ -1861,6 +1897,7 @@ export default function Home() {
                   >
                     {renderTopology(expandedLayout)}
                   </div>
+                  {renderSelectedDeviceMapCard(true)}
                   <div className="map-orientation expanded-orientation"><span>北</span><i></i></div>
                   <div className="map-zoom-controls" aria-label="地圖縮放控制">
                     <button type="button" onClick={() => zoomExpandedMap(0.2)} aria-label="放大地圖">＋</button>
