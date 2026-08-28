@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { TurnstileWidget } from "./components/TurnstileWidget";
 import { calculateConsumptionBaseline, forecastOilLevel } from "./lib/consumptionBaseline";
+import type { DeviceAxleProfile } from "./lib/deviceAxleProfile";
 import { LubricationImportError, readLubricationWorkbook } from "./lib/lubricationExcel";
 import type { LubricationRecord } from "./lib/lubricationExcel";
 
@@ -645,6 +646,7 @@ export default function Home() {
   const [manualTurnstileResetKey, setManualTurnstileResetKey] = useState(0);
   const [forecastDate, setForecastDate] = useState(todayInTaipei);
   const [activeSegments, setActiveSegments] = useState<Segment[]>(segments);
+  const [deviceAxleProfiles, setDeviceAxleProfiles] = useState<DeviceAxleProfile[]>([]);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [excelImport, setExcelImport] = useState<ExcelImportState>({
     status: "loading",
@@ -669,9 +671,10 @@ export default function Home() {
     let cancelled = false;
     void fetch("/api/lubrication", { cache: "no-store" })
       .then(async (response) => {
-        const payload = await response.json() as { records?: LubricationRecord[]; error?: string };
+        const payload = await response.json() as { records?: LubricationRecord[]; deviceAxleProfiles?: DeviceAxleProfile[]; error?: string };
         if (!response.ok || !payload.records) throw new Error(payload.error ?? "無法讀取永久資料庫。");
         if (cancelled) return;
+        setDeviceAxleProfiles(payload.deviceAxleProfiles ?? []);
         const latestRecord = syncRecordsToDashboard(payload.records);
         setExcelImport({
           status: "success",
@@ -859,6 +862,10 @@ export default function Home() {
   const selectedDevice = useMemo(
     () => selectedSegment.devices.find((device) => device.id === selectedDeviceId) ?? null,
     [selectedDeviceId, selectedSegment],
+  );
+  const selectedAxleProfile = useMemo(
+    () => deviceAxleProfiles.find((profile) => profile.deviceId === selectedDeviceId) ?? null,
+    [deviceAxleProfiles, selectedDeviceId],
   );
   const selectedConsumptionBaseline = useMemo(
     () => calculateConsumptionBaseline(baselineRecordsForDevice(selectedDevice)),
@@ -1261,7 +1268,12 @@ export default function Home() {
         </header>
         <dl>
           <div><dt>方向</dt><dd>{direction}</dd></div>
-          <div><dt>軸數</dt><dd className="selected-map-empty-value" aria-label="軸數尚未設定"><span aria-hidden="true">&nbsp;</span></dd></div>
+          <div>
+            <dt>軸數</dt>
+            <dd className={selectedAxleProfile ? "" : "selected-map-empty-value"} aria-label={selectedAxleProfile ? `${selectedAxleProfile.stageCount}階${selectedAxleProfile.axleCount}軸` : "軸數尚未設定"}>
+              {selectedAxleProfile ? `${selectedAxleProfile.stageCount}階${selectedAxleProfile.axleCount}軸` : <span aria-hidden="true">&nbsp;</span>}
+            </dd>
+          </div>
           <div className="selected-map-location"><dt>站間</dt><dd><span>{fromStation.id} {fromStation.name}</span><i>→</i><span>{toStation.id} {toStation.name}</span></dd></div>
           <div><dt>當前流量</dt><dd>{hasData ? `${selectedDevice.value} L` : "無資料"}</dd></div>
           <div><dt>狀態</dt><dd className={selectedStatus}>{hasData ? statusText[selectedStatus] : "無資料"}</dd></div>

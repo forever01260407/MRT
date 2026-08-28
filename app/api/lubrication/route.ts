@@ -6,6 +6,7 @@ import {
   getDeleteAuthorizationRuntimeEnv,
 } from "../../lib/deleteAuthorization";
 import { initialLubricationRecords } from "../../lib/initialLubricationRecords";
+import type { DeviceAxleProfile } from "../../lib/deviceAxleProfile";
 import type { LubricationRecord, LubricationRecordType } from "../../lib/lubricationExcel";
 import type { LubricationRevision, MonitoredLubricationRecord } from "../../lib/lubricationMonitor";
 import {
@@ -47,6 +48,15 @@ type StoredRevisionRow = {
   corrected_by: string;
   created_by: string;
   created_at: string;
+};
+
+type StoredDeviceAxleProfileRow = {
+  device_id: string;
+  effective_date: string;
+  stage_count: number;
+  axle_count: number;
+  created_at: string;
+  updated_at: string;
 };
 
 type CorrectionPayload = {
@@ -292,6 +302,17 @@ function revisionRowToRevision(row: StoredRevisionRow): LubricationRevision {
   };
 }
 
+function rowToDeviceAxleProfile(row: StoredDeviceAxleProfileRow): DeviceAxleProfile {
+  return {
+    deviceId: row.device_id,
+    effectiveDate: row.effective_date,
+    stageCount: row.stage_count,
+    axleCount: row.axle_count,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function isLocalRequest(request: Request) {
   const hostname = new URL(request.url).hostname;
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
@@ -335,6 +356,14 @@ async function initializeDatabase(d1: D1Database) {
       corrected_by TEXT NOT NULL,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS device_axle_profiles (
+      device_id TEXT PRIMARY KEY NOT NULL,
+      effective_date TEXT NOT NULL,
+      stage_count INTEGER NOT NULL CHECK (stage_count > 0),
+      axle_count INTEGER NOT NULL CHECK (axle_count > 0),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS measurements_device_measured_at_uidx ON measurements (device_id, measured_at)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurements_measured_at ON measurements (measured_at)"),
@@ -391,6 +420,13 @@ async function listMeasurements(d1: D1Database) {
   return monitored
     .map((item) => item.current)
     .sort((left, right) => left.measuredAt.localeCompare(right.measuredAt) || left.deviceId.localeCompare(right.deviceId, "en", { numeric: true }));
+}
+
+async function listDeviceAxleProfiles(d1: D1Database) {
+  const result = await d1.prepare(`SELECT device_id, effective_date, stage_count, axle_count, created_at, updated_at
+    FROM device_axle_profiles
+    ORDER BY device_id ASC`).all<StoredDeviceAxleProfileRow>();
+  return result.results.map(rowToDeviceAxleProfile);
 }
 
 async function listRevisionRows(d1: D1Database) {
@@ -469,8 +505,16 @@ export async function GET(request: Request) {
         revisionCount: records.reduce((sum, item) => sum + item.revisions.length, 0),
       });
     }
-    const records = await listMeasurements(d1);
-    return Response.json({ records, count: records.length, latestMeasuredAt: records.at(-1)?.measuredAt ?? null });
+    const [records, deviceAxleProfiles] = await Promise.all([
+      listMeasurements(d1),
+      listDeviceAxleProfiles(d1),
+    ]);
+    return Response.json({
+      records,
+      deviceAxleProfiles,
+      count: records.length,
+      latestMeasuredAt: records.at(-1)?.measuredAt ?? null,
+    });
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "無法讀取永久資料庫。" },

@@ -52,3 +52,15 @@ export const measurementRevisions = sqliteTable("measurement_revisions", {
   check("measurement_revisions_oil_level_nonnegative", sql`${table.oilLevel} >= 0`),
   check("measurement_revisions_record_type_valid", sql`${table.recordType} IN ('量測', '補油')`),
 ]);
+
+export const deviceAxleProfiles = sqliteTable("device_axle_profiles", {
+  deviceId: text("device_id").primaryKey(),
+  effectiveDate: text("effective_date").notNull(),
+  stageCount: integer("stage_count").notNull(),
+  axleCount: integer("axle_count").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  check("device_axle_profiles_stage_count_positive", sql`${table.stageCount} > 0`),
+  check("device_axle_profiles_axle_count_positive", sql`${table.axleCount} > 0`),
+]);

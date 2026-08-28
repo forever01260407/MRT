@@ -51,8 +51,36 @@ test("keeps the lubrication map summary synchronized with the selected device", 
   assert.match(page, /目前選取設備/);
   assert.match(page, /<dt>當前流量<\/dt>/);
   assert.match(page, /<dt>軸數<\/dt>/);
-  assert.match(page, /aria-label="軸數尚未設定"/);
+  assert.match(page, /"軸數尚未設定"/);
   assert.match(page, /renderSelectedDeviceMapCard\(true\)/);
+});
+
+test("links a separate empty axle-profile category to lubrication devices", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
+  const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
+  const migration = await readFile(new URL("../drizzle/0002_peaceful_norrin_radd.sql", import.meta.url), "utf8");
+
+  assert.match(schema, /deviceAxleProfiles/);
+  assert.match(schema, /sqliteTable\("device_axle_profiles"/);
+  assert.match(schema, /deviceId: text\("device_id"\)\.primaryKey\(\)/);
+  assert.match(schema, /effectiveDate: text\("effective_date"\)/);
+  assert.match(schema, /stageCount: integer\("stage_count"\)/);
+  assert.match(schema, /axleCount: integer\("axle_count"\)/);
+  assert.match(schema, /device_axle_profiles_stage_count_positive/);
+  assert.match(schema, /device_axle_profiles_axle_count_positive/);
+
+  assert.match(route, /CREATE TABLE IF NOT EXISTS device_axle_profiles/);
+  assert.match(route, /listDeviceAxleProfiles/);
+  assert.match(route, /deviceAxleProfiles,/);
+  assert.doesNotMatch(route, /INSERT INTO device_axle_profiles/);
+  assert.match(migration, /CREATE TABLE `device_axle_profiles`/);
+  assert.doesNotMatch(migration, /INSERT INTO `device_axle_profiles`/);
+
+  assert.match(page, /setDeviceAxleProfiles\(payload\.deviceAxleProfiles \?\? \[\]\)/);
+  assert.match(page, /profile\.deviceId === selectedDeviceId/);
+  assert.match(page, /selectedAxleProfile\.stageCount/);
+  assert.match(page, /selectedAxleProfile\.axleCount/);
 });
 
 test("server-renders the complete append-only record monitor", async () => {
