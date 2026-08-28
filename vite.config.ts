@@ -53,6 +53,11 @@ export default defineConfig(async ({ command, mode }) => {
         namespace_id: "1002",
         simple: { limit: 5, period: 60 as const },
       },
+      {
+        name: "DEVICE_AXLE_PROFILE_RATE_LIMITER",
+        namespace_id: "1003",
+        simple: { limit: 10, period: 60 as const },
+      },
     ],
     ...(command === "serve"
       ? {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 async function render(pathname = "/") {
@@ -34,6 +35,7 @@ test("server-renders the rail lubrication monitoring dashboard", async () => {
   assert.match(html, /現場登記/);
   assert.match(html, /登記現場量測/);
   assert.match(html, /Monitor Area/);
+  assert.match(html, /階軸設定/);
   assert.doesNotMatch(html, /class="nav-item"[^>]*>Monitor 完整紀錄/);
   assert.match(html, /固定潤滑設備/);
   assert.match(html, /MOK 10 · LB 10/);
@@ -58,6 +60,7 @@ test("keeps the lubrication map summary synchronized with the selected device", 
 test("links a separate empty axle-profile category to lubrication devices", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
+  const profileStore = await readFile(new URL("../app/lib/deviceAxleProfile.ts", import.meta.url), "utf8");
   const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
   const migration = await readFile(new URL("../drizzle/0002_peaceful_norrin_radd.sql", import.meta.url), "utf8");
 
@@ -70,10 +73,9 @@ test("links a separate empty axle-profile category to lubrication devices", asyn
   assert.match(schema, /device_axle_profiles_stage_count_positive/);
   assert.match(schema, /device_axle_profiles_axle_count_positive/);
 
-  assert.match(route, /CREATE TABLE IF NOT EXISTS device_axle_profiles/);
+  assert.match(profileStore, /CREATE TABLE IF NOT EXISTS device_axle_profiles/);
   assert.match(route, /listDeviceAxleProfiles/);
   assert.match(route, /deviceAxleProfiles,/);
-  assert.doesNotMatch(route, /INSERT INTO device_axle_profiles/);
   assert.match(migration, /CREATE TABLE `device_axle_profiles`/);
   assert.doesNotMatch(migration, /INSERT INTO `device_axle_profiles`/);
 
@@ -81,6 +83,49 @@ test("links a separate empty axle-profile category to lubrication devices", asyn
   assert.match(page, /profile\.deviceId === selectedDeviceId/);
   assert.match(page, /selectedAxleProfile\.stageCount/);
   assert.match(page, /selectedAxleProfile\.axleCount/);
+});
+
+test("securely creates and overwrites one axle profile per lubrication device", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const route = await readFile(new URL("../app/api/device-axle-profiles/route.ts", import.meta.url), "utf8");
+  const profileStore = await readFile(new URL("../app/lib/deviceAxleProfile.ts", import.meta.url), "utf8");
+  const authorization = await readFile(new URL("../app/lib/deviceAxleProfileAuthorization.ts", import.meta.url), "utf8");
+  const migration = await readFile(new URL("../drizzle/0002_peaceful_norrin_radd.sql", import.meta.url), "utf8");
+  const viteConfig = await readFile(new URL("../vite.config.ts", import.meta.url), "utf8");
+
+  assert.match(page, /className="mini-axle-settings-button"/);
+  assert.match(page, /潤滑站點/);
+  assert.match(page, /更新日期/);
+  assert.match(page, /確認覆蓋目前設定/);
+  assert.match(page, /method: "PUT"/);
+  assert.match(page, /type="password"/);
+  assert.match(route, /export async function PUT/);
+  assert.doesNotMatch(route, /export async function DELETE/);
+  assert.match(route, /authorizeDeviceAxleProfileWrite/);
+  assert.match(route, /normalizeDeviceId/);
+  assert.match(profileStore, /ON CONFLICT\(device_id\) DO UPDATE SET/);
+  assert.match(authorization, /DELETE_PASSWORD\?: string/);
+  assert.match(authorization, /DEVICE_AXLE_PROFILE_RATE_LIMITER/);
+  assert.match(authorization, /timingSafeEqual/);
+  assert.match(authorization, /device-axle-profile:/);
+  assert.match(viteConfig, /name: "DEVICE_AXLE_PROFILE_RATE_LIMITER"/);
+  assert.match(viteConfig, /namespace_id: "1003"/);
+
+  const sqlStart = profileStore.indexOf("`INSERT INTO device_axle_profiles");
+  const sqlEnd = profileStore.indexOf("`)", sqlStart);
+  assert.ok(sqlStart >= 0 && sqlEnd > sqlStart, "upsert SQL should be present");
+  const upsertSql = profileStore.slice(sqlStart + 1, sqlEnd);
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec(migration);
+    const upsert = database.prepare(upsertSql);
+    upsert.run("LB1", "2026-05-01", 3, 12);
+    upsert.run("LB1", "2026-05-14", 3, 4);
+    const rows = database.prepare("SELECT device_id, effective_date, stage_count, axle_count FROM device_axle_profiles").all();
+    assert.deepEqual(rows.map((row) => ({ ...row })), [{ device_id: "LB1", effective_date: "2026-05-14", stage_count: 3, axle_count: 4 }]);
+  } finally {
+    database.close();
+  }
 });
 
 test("server-renders the complete append-only record monitor", async () => {

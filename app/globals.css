@@ -88,6 +88,28 @@ button:focus-visible {
 .updated-at { padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: var(--surface); font-size: 12px; white-space: nowrap; }
 .updated-at strong { color: var(--ink); }
 .page-heading-side { display: grid; justify-items: end; gap: 7px; }
+.page-heading-tools { display: flex; align-items: stretch; justify-content: flex-end; gap: 8px; }
+.mini-axle-settings-button {
+  min-width: 210px;
+  padding: 7px 10px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #d8d3ff;
+  border-radius: 10px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, .84);
+  text-align: left;
+  box-shadow: 0 3px 10px rgba(36, 49, 75, .04);
+  cursor: pointer;
+}
+.mini-axle-settings-button:hover { border-color: var(--violet); background: var(--violet-soft); }
+.mini-axle-settings-icon { width: 23px; height: 23px; display: grid; place-items: center; border-radius: 7px; color: #fff; background: var(--violet); font-size: 9px; font-weight: 900; }
+.mini-axle-settings-button span:nth-child(2) { display: grid; gap: 1px; }
+.mini-axle-settings-button strong { font-size: 10px; letter-spacing: .08em; }
+.mini-axle-settings-button small { color: var(--muted); font-size: 9px; }
+.mini-axle-settings-button b { color: var(--violet); font-size: 15px; }
 .mini-monitor-link {
   min-width: 224px;
   padding: 7px 10px;
@@ -277,6 +299,24 @@ button:focus-visible {
 .manual-entry-submit:hover { background: #5145c7; }
 .manual-entry-cancel:disabled, .manual-entry-submit:disabled { opacity: .65; cursor: wait; }
 .manual-entry-open-button:focus-visible, .manual-entry-close:focus-visible, .manual-entry-cancel:focus-visible, .manual-entry-submit:focus-visible { outline: 3px solid rgba(98, 85, 223, .28); outline-offset: 2px; }
+.mini-axle-settings-button:focus-visible { outline: 3px solid rgba(98, 85, 223, .28); outline-offset: 2px; }
+
+.axle-settings-modal { width: min(610px, calc(100vw - 40px)); }
+.axle-settings-modal-header h3 > span { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: var(--violet); font-size: 11px; font-weight: 900; }
+.axle-settings-form { gap: 15px; }
+.axle-settings-current { padding: 12px 14px; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 3px 12px; border: 1px dashed #d4dce7; border-radius: 12px; background: #f8fafc; }
+.axle-settings-current > span { color: var(--muted); font-size: 10px; font-weight: 900; }
+.axle-settings-current > strong { justify-self: end; color: var(--ink); font-size: 16px; }
+.axle-settings-current > small { grid-column: 1 / -1; color: var(--ink-soft); font-size: 10px; line-height: 1.45; }
+.axle-settings-current.configured { border-style: solid; border-color: #cfc9ff; background: var(--violet-soft); }
+.axle-settings-current.configured > strong { color: var(--violet); }
+.axle-settings-feedback { padding: 10px 12px; display: flex; align-items: center; gap: 9px; border: 1px solid #dce3ec; border-radius: 10px; color: var(--ink-soft); background: #f8fafc; font-size: 11px; line-height: 1.5; }
+.axle-settings-feedback > span { width: 20px; height: 20px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 999px; color: #fff; background: var(--muted); font-size: 10px; font-weight: 900; }
+.axle-settings-feedback.saving > span { animation: turnstile-spin 1s linear infinite; }
+.axle-settings-feedback.success { border-color: #bde8d9; color: #087b59; background: #f0fbf7; }
+.axle-settings-feedback.success > span { background: var(--success); }
+.axle-settings-feedback.error { border-color: #ffc4cf; color: #b32643; background: var(--danger-soft); }
+.axle-settings-feedback.error > span { background: var(--danger); }
 
 /* Complete record monitor ------------------------------------------------ */
 .monitor-content { width: min(1720px, 100%); }
@@ -1108,6 +1148,9 @@ button:focus-visible {
   .topnav { width: 100%; justify-self: start; overflow-x: auto; }
   .sync-state { justify-self: start; }
   .page-heading { align-items: flex-start; flex-direction: column; }
+  .page-heading-side { width: 100%; justify-items: stretch; }
+  .page-heading-tools { width: 100%; display: grid; grid-template-columns: 1fr; }
+  .mini-axle-settings-button, .mini-monitor-link { width: 100%; min-width: 0; }
   .excel-import-panel { grid-template-columns: auto 1fr; align-items: start; }
   .excel-import-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .excel-import-result { grid-column: 1 / -1; }

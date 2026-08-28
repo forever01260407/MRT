@@ -94,6 +94,19 @@ type ManualEntryFeedback = {
   message: string;
 };
 
+type AxleSettingsForm = {
+  deviceId: string;
+  effectiveDate: string;
+  stageCount: string;
+  axleCount: string;
+  password: string;
+};
+
+type AxleSettingsFeedback = {
+  status: "idle" | "saving" | "success" | "error";
+  message: string;
+};
+
 const stations: Station[] = [
   { id: "Y6", name: "大坪林" },
   { id: "Y7", name: "十四張" },
@@ -346,6 +359,11 @@ function todayInTaipei() {
   }).formatToParts(new Date());
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function formatLubricationDeviceId(deviceId: string) {
+  const match = deviceId.match(/^(MOK|LB)(\d{1,2})$/);
+  return match ? `${match[1]}-${match[2].padStart(2, "0")}` : deviceId;
 }
 
 function calendarDaysBetween(startDate: string, endDate: string) {
@@ -619,6 +637,8 @@ export default function Home() {
   const closeChartButtonRef = useRef<HTMLButtonElement>(null);
   const manualEntryTriggerRef = useRef<HTMLButtonElement>(null);
   const closeManualEntryButtonRef = useRef<HTMLButtonElement>(null);
+  const axleSettingsTriggerRef = useRef<HTMLButtonElement>(null);
+  const closeAxleSettingsButtonRef = useRef<HTMLButtonElement>(null);
   const mapDragRef = useRef({ pointerId: -1, startX: 0, startY: 0, originX: 0, originY: 0, moved: false });
   const [mapSize, setMapSize] = useState({ width: 1000, height: 680 });
   const [expandedMapSize, setExpandedMapSize] = useState({ width: 1400, height: 760 });
@@ -630,6 +650,7 @@ export default function Home() {
   const [mapViewport, setMapViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [isChartExpanded, setIsChartExpanded] = useState(false);
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
+  const [isAxleSettingsOpen, setIsAxleSettingsOpen] = useState(false);
   const [manualEntry, setManualEntry] = useState<ManualEntryForm>(() => ({
     deviceId: "",
     oilLevel: "",
@@ -641,6 +662,17 @@ export default function Home() {
   const [manualEntryFeedback, setManualEntryFeedback] = useState<ManualEntryFeedback>({
     status: "idle",
     message: "POV 開放免登入單筆登記，送出前會自動完成安全驗證。",
+  });
+  const [axleSettings, setAxleSettings] = useState<AxleSettingsForm>(() => ({
+    deviceId: "",
+    effectiveDate: todayInTaipei(),
+    stageCount: "",
+    axleCount: "",
+    password: "",
+  }));
+  const [axleSettingsFeedback, setAxleSettingsFeedback] = useState<AxleSettingsFeedback>({
+    status: "idle",
+    message: "選擇潤滑站點後，儲存會建立或覆蓋該站目前設定。",
   });
   const [manualTurnstileToken, setManualTurnstileToken] = useState<string | null>(null);
   const [manualTurnstileResetKey, setManualTurnstileResetKey] = useState(0);
@@ -769,6 +801,25 @@ export default function Home() {
     };
   }, [isManualEntryOpen, manualEntryFeedback.status]);
 
+  useEffect(() => {
+    if (!isAxleSettingsOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeAxleSettingsButtonRef.current?.focus();
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || axleSettingsFeedback.status === "saving") return;
+      setIsAxleSettingsOpen(false);
+      window.requestAnimationFrame(() => axleSettingsTriggerRef.current?.focus());
+    };
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isAxleSettingsOpen, axleSettingsFeedback.status]);
+
   const closeExpandedChart = () => {
     setIsChartExpanded(false);
     window.requestAnimationFrame(() => expandChartButtonRef.current?.focus());
@@ -867,6 +918,10 @@ export default function Home() {
     () => deviceAxleProfiles.find((profile) => profile.deviceId === selectedDeviceId) ?? null,
     [deviceAxleProfiles, selectedDeviceId],
   );
+  const editingAxleProfile = useMemo(
+    () => deviceAxleProfiles.find((profile) => profile.deviceId === axleSettings.deviceId) ?? null,
+    [axleSettings.deviceId, deviceAxleProfiles],
+  );
   const selectedConsumptionBaseline = useMemo(
     () => calculateConsumptionBaseline(baselineRecordsForDevice(selectedDevice)),
     [selectedDevice],
@@ -920,6 +975,100 @@ export default function Home() {
   const warningCount = allDeviceRecords.filter(({ device }) => device.status === "warning").length;
   const manualDeviceOptions = useMemo(() => Array.from(new Set(allDeviceRecords.map(({ device }) => device.id)))
     .sort((left, right) => left.localeCompare(right, "en", { numeric: true })), [allDeviceRecords]);
+
+  const axleProfileForDevice = (deviceId: string) => (
+    deviceAxleProfiles.find((profile) => profile.deviceId === deviceId) ?? null
+  );
+
+  const axleSettingsForDevice = (deviceId: string): AxleSettingsForm => {
+    const profile = axleProfileForDevice(deviceId);
+    return {
+      deviceId,
+      effectiveDate: todayInTaipei(),
+      stageCount: profile ? String(profile.stageCount) : "",
+      axleCount: profile ? String(profile.axleCount) : "",
+      password: "",
+    };
+  };
+
+  const openAxleSettings = () => {
+    const deviceId = selectedDevice?.id ?? manualDeviceOptions[0] ?? "";
+    setAxleSettings(axleSettingsForDevice(deviceId));
+    setAxleSettingsFeedback({ status: "idle", message: "儲存後會覆蓋同一潤滑站點目前的階軸設定，不會新增重複站點。" });
+    setIsAxleSettingsOpen(true);
+  };
+
+  const closeAxleSettings = () => {
+    if (axleSettingsFeedback.status === "saving") return;
+    setIsAxleSettingsOpen(false);
+    window.requestAnimationFrame(() => axleSettingsTriggerRef.current?.focus());
+  };
+
+  const selectAxleSettingsDevice = (deviceId: string) => {
+    setAxleSettings(axleSettingsForDevice(deviceId));
+    setAxleSettingsFeedback({ status: "idle", message: "儲存後會建立或覆蓋這個潤滑站點的目前設定。" });
+  };
+
+  const submitAxleSettings = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const stageCount = Number(axleSettings.stageCount);
+    const axleCount = Number(axleSettings.axleCount);
+    if (!axleSettings.deviceId || !axleSettings.effectiveDate) {
+      setAxleSettingsFeedback({ status: "error", message: "請選擇潤滑站點並填寫更新日期。" });
+      return;
+    }
+    if (!Number.isInteger(stageCount) || stageCount < 1 || stageCount > 99) {
+      setAxleSettingsFeedback({ status: "error", message: "階數必須是 1～99 的整數。" });
+      return;
+    }
+    if (!Number.isInteger(axleCount) || axleCount < 1 || axleCount > 999) {
+      setAxleSettingsFeedback({ status: "error", message: "軸數必須是 1～999 的整數。" });
+      return;
+    }
+    if (!axleSettings.password.trim()) {
+      setAxleSettingsFeedback({ status: "error", message: "請輸入管理密碼。" });
+      return;
+    }
+
+    setAxleSettingsFeedback({ status: "saving", message: "正在寫入 D1 並更新站點顯示…" });
+    try {
+      const response = await fetch("/api/device-axle-profiles", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          deviceId: axleSettings.deviceId,
+          effectiveDate: axleSettings.effectiveDate,
+          stageCount,
+          axleCount,
+          password: axleSettings.password,
+        }),
+      });
+      const payload = await response.json() as {
+        profile?: DeviceAxleProfile;
+        deviceAxleProfiles?: DeviceAxleProfile[];
+        overwritten?: boolean;
+        message?: string;
+        error?: string;
+      };
+      if (!response.ok || !payload.profile || !payload.deviceAxleProfiles) {
+        throw new Error(payload.error ?? "階軸設定無法寫入永久資料庫。");
+      }
+
+      setDeviceAxleProfiles(payload.deviceAxleProfiles);
+      const targetSegment = activeSegments.find((segment) => segment.devices.some((device) => device.id === payload.profile?.deviceId));
+      if (targetSegment) {
+        setSelectedSegmentId(targetSegment.id);
+        setSelectedDeviceId(payload.profile.deviceId);
+      }
+      setAxleSettings((current) => ({ ...current, password: "" }));
+      setAxleSettingsFeedback({
+        status: "success",
+        message: `${formatLubricationDeviceId(payload.profile.deviceId)} 已${payload.overwritten ? "覆蓋" : "建立"}為 ${payload.profile.stageCount}階${payload.profile.axleCount}軸。`,
+      });
+    } catch (error) {
+      setAxleSettingsFeedback({ status: "error", message: error instanceof Error ? error.message : "階軸設定無法寫入永久資料庫。" });
+    }
+  };
 
   const openManualEntry = () => {
     setManualEntry({
@@ -1368,11 +1517,24 @@ export default function Home() {
           </div>
           <div className="page-heading-side">
             <div className="updated-at">資料時間 <strong>{excelImport.latestMeasuredAt ? formatMeasurementTime(excelImport.latestMeasuredAt) : "讀取中"}</strong></div>
-            <a className="mini-monitor-link" href="/monitor">
-              <span className="mini-monitor-dot" aria-hidden="true"></span>
-              <span><strong>Monitor Area</strong><small>查看全部紀錄與更正歷程</small></span>
-              <b aria-hidden="true">→</b>
-            </a>
+            <div className="page-heading-tools">
+              <button
+                type="button"
+                className="mini-axle-settings-button"
+                ref={axleSettingsTriggerRef}
+                onClick={openAxleSettings}
+                aria-haspopup="dialog"
+              >
+                <span className="mini-axle-settings-icon" aria-hidden="true">軸</span>
+                <span><strong>階軸設定</strong><small>設定潤滑站點階數與軸數</small></span>
+                <b aria-hidden="true">＋</b>
+              </button>
+              <a className="mini-monitor-link" href="/monitor">
+                <span className="mini-monitor-dot" aria-hidden="true"></span>
+                <span><strong>Monitor Area</strong><small>查看全部紀錄與更正歷程</small></span>
+                <b aria-hidden="true">→</b>
+              </a>
+            </div>
           </div>
         </div>
 
@@ -1716,6 +1878,131 @@ export default function Home() {
             )}
           </aside>
         </section>
+
+        {isAxleSettingsOpen ? (
+          <div
+            className="manual-entry-backdrop axle-settings-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeAxleSettings();
+            }}
+          >
+            <section
+              className="manual-entry-modal axle-settings-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="axle-settings-title"
+              aria-describedby="axle-settings-description"
+            >
+              <header className="manual-entry-modal-header axle-settings-modal-header">
+                <div>
+                  <span className="panel-kicker">DEVICE STAGE &amp; AXLE</span>
+                  <h3 id="axle-settings-title"><span aria-hidden="true">軸</span>階軸設定</h3>
+                  <p id="axle-settings-description">每個潤滑站點只保留目前設定；再次儲存同一站點會直接覆蓋，不提供刪除。</p>
+                </div>
+                <button
+                  type="button"
+                  className="manual-entry-close"
+                  ref={closeAxleSettingsButtonRef}
+                  onClick={closeAxleSettings}
+                  disabled={axleSettingsFeedback.status === "saving"}
+                  aria-label="關閉階軸設定"
+                >×</button>
+              </header>
+
+              <form className="manual-entry-form axle-settings-form" onSubmit={submitAxleSettings} aria-busy={axleSettingsFeedback.status === "saving"}>
+                <label className="manual-entry-field full-width">
+                  <span>潤滑站點 <b>*</b></span>
+                  <select
+                    value={axleSettings.deviceId}
+                    onChange={(event) => selectAxleSettingsDevice(event.target.value)}
+                    disabled={axleSettingsFeedback.status === "saving"}
+                    required
+                  >
+                    <option value="" disabled>請選擇 MOK／LB 站點</option>
+                    {manualDeviceOptions.map((deviceId) => <option key={deviceId} value={deviceId}>{formatLubricationDeviceId(deviceId)}</option>)}
+                  </select>
+                </label>
+
+                <div className={`axle-settings-current ${editingAxleProfile ? "configured" : "empty"}`} aria-live="polite">
+                  <span>目前設定</span>
+                  <strong>{editingAxleProfile ? `${editingAxleProfile.stageCount}階${editingAxleProfile.axleCount}軸` : "尚未設定"}</strong>
+                  <small>{editingAxleProfile ? `生效日期 ${editingAxleProfile.effectiveDate}` : "首次儲存會建立此站點的階軸資料。"}</small>
+                </div>
+
+                <div className="manual-entry-field-row axle-settings-count-row">
+                  <label className="manual-entry-field">
+                    <span>階數 <b>*</b></span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="99"
+                      step="1"
+                      inputMode="numeric"
+                      value={axleSettings.stageCount}
+                      onChange={(event) => setAxleSettings((current) => ({ ...current, stageCount: event.target.value }))}
+                      disabled={axleSettingsFeedback.status === "saving"}
+                      placeholder="例如：3"
+                      required
+                    />
+                  </label>
+                  <label className="manual-entry-field">
+                    <span>軸數 <b>*</b></span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="999"
+                      step="1"
+                      inputMode="numeric"
+                      value={axleSettings.axleCount}
+                      onChange={(event) => setAxleSettings((current) => ({ ...current, axleCount: event.target.value }))}
+                      disabled={axleSettingsFeedback.status === "saving"}
+                      placeholder="例如：12"
+                      required
+                    />
+                  </label>
+                </div>
+
+                <div className="manual-entry-field-row">
+                  <label className="manual-entry-field">
+                    <span>更新日期 <b>*</b></span>
+                    <input
+                      type="date"
+                      max={todayInTaipei()}
+                      value={axleSettings.effectiveDate}
+                      onChange={(event) => setAxleSettings((current) => ({ ...current, effectiveDate: event.target.value }))}
+                      disabled={axleSettingsFeedback.status === "saving"}
+                      required
+                    />
+                  </label>
+                  <label className="manual-entry-field">
+                    <span>管理密碼 <b>*</b></span>
+                    <input
+                      type="password"
+                      autoComplete="current-password"
+                      value={axleSettings.password}
+                      onChange={(event) => setAxleSettings((current) => ({ ...current, password: event.target.value }))}
+                      disabled={axleSettingsFeedback.status === "saving"}
+                      placeholder="輸入目前的管理密碼"
+                      required
+                    />
+                  </label>
+                </div>
+
+                <div className={`axle-settings-feedback ${axleSettingsFeedback.status}`} role={axleSettingsFeedback.status === "error" ? "alert" : "status"} aria-live="polite">
+                  <span aria-hidden="true">{axleSettingsFeedback.status === "success" ? "✓" : axleSettingsFeedback.status === "error" ? "!" : axleSettingsFeedback.status === "saving" ? "↻" : "i"}</span>
+                  {axleSettingsFeedback.message}
+                </div>
+
+                <footer className="manual-entry-form-actions">
+                  <button type="button" className="manual-entry-cancel" onClick={closeAxleSettings} disabled={axleSettingsFeedback.status === "saving"}>關閉</button>
+                  <button type="submit" className="manual-entry-submit" disabled={axleSettingsFeedback.status === "saving"}>
+                    {axleSettingsFeedback.status === "saving" ? "同步中…" : editingAxleProfile ? "確認覆蓋目前設定" : "建立階軸設定"}
+                  </button>
+                </footer>
+              </form>
+            </section>
+          </div>
+        ) : null}
 
         {isManualEntryOpen ? (
           <div
