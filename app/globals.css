@@ -1398,6 +1398,24 @@ button:focus-visible {
 .wear-maintenance-note.critical { border-left-color: var(--danger); background: var(--danger-soft); }
 .wear-maintenance-note strong { font-size: 13px; }
 .wear-maintenance-note p { margin: 4px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 1.6; }
+.wear-updated-at { display: grid; grid-template-columns: auto auto; align-items: baseline; gap: 2px 7px; }
+.wear-updated-at small { grid-column: 1 / -1; color: var(--muted); font-size: 9px; text-align: right; }
+.wear-prediction-card { margin-top: 16px; padding: 16px; border: 1px solid #d8d3ff; border-radius: 13px; background: linear-gradient(135deg, #fff 45%, #f4f2ff); }
+.wear-prediction-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.wear-prediction-card h4 { margin: 4px 0 0; color: var(--ink); font-size: 16px; }
+.wear-prediction-confidence { padding: 6px 9px; border-radius: 999px; color: #315d50; background: #dcf7ec; font-size: 10px; font-weight: 900; white-space: nowrap; }
+.wear-prediction-card.confidence-medium .wear-prediction-confidence { color: #8a5d00; background: var(--warning-soft); }
+.wear-prediction-card.confidence-low .wear-prediction-confidence,
+.wear-prediction-card.confidence-insufficient .wear-prediction-confidence { color: #8f5360; background: #f6e9ec; }
+.wear-prediction-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.wear-prediction-grid > div { min-width: 0; padding: 12px; display: grid; gap: 5px; border: 1px solid rgba(216, 211, 255, .82); border-radius: 10px; background: rgba(255, 255, 255, .78); }
+.wear-prediction-grid span { color: var(--muted); font-size: 10px; }
+.wear-prediction-grid strong { color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
+.wear-prediction-grid small { color: var(--ink-soft); font-size: 9px; line-height: 1.45; }
+.wear-prediction-card > footer { margin-top: 11px; padding-top: 10px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-top: 1px solid #e2defb; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.wear-prediction-card > footer span { white-space: nowrap; }
+.wear-prediction-card > footer strong { color: var(--violet); }
+.wear-prediction-card > footer p { max-width: 440px; margin: 0; text-align: right; }
 .wear-history-panel { min-width: 0; padding: 22px; }
 .wear-history-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .wear-history-heading h3 { margin: 4px 0 0; color: var(--ink); font-size: 20px; }
@@ -1448,6 +1466,9 @@ button:focus-visible {
   .rail-direction-tabs { grid-template-columns: 1fr 1fr; }
   .wear-reading-grid { grid-template-columns: repeat(2, 1fr); }
   .wear-summary-grid { grid-template-columns: repeat(2, 1fr); }
+  .wear-prediction-grid { grid-template-columns: 1fr; }
+  .wear-prediction-card > footer { display: grid; gap: 5px; }
+  .wear-prediction-card > footer p { text-align: left; }
 }
 
 @media (max-width: 480px) {

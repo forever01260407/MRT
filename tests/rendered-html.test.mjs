@@ -140,6 +140,19 @@ test("server-renders the complete append-only record monitor", async () => {
   assert.match(html, /切換為 LB1 到 MOK10 的設備順序/);
 });
 
+test("server-renders a sparse-inspection tread-wear forecast without trusting the browser clock", async () => {
+  const response = await render("/wear");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /未來磨耗警戒預測/);
+  assert.match(html, /穩健磨耗率/);
+  assert.match(html, /90 日後預估/);
+  assert.match(html, /可信外推至/);
+  assert.match(html, /不讀取使用者裝置時間/);
+  assert.match(html, /Asia\/Taipei · 非即時監測/);
+});
+
 test("requires a rate-limited runtime secret before permanently deleting a record", async () => {
   const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
   const page = await readFile(new URL("../app/monitor/page.tsx", import.meta.url), "utf8");

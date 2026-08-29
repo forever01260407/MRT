@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import { predictWearTrend } from "../lib/wearPrediction";
+import type { WearPredictionConfidence, WearThresholdPrediction } from "../lib/wearPrediction";
 
 type RailStatus = "normal" | "warning" | "critical";
 type RailSide = "left" | "right";
@@ -145,6 +147,28 @@ const statusText: Record<RailStatus, string> = { normal: "正常", warning: "管
 const sideText: Record<RailSide, string> = { left: "左軌", right: "右軌" };
 const directionText: Record<Direction, string> = { up: "上行", down: "下行" };
 const statusPriority: Record<RailStatus, number> = { normal: 1, warning: 2, critical: 3 };
+const predictionConfidenceText: Record<WearPredictionConfidence, string> = {
+  insufficient: "資料不足",
+  low: "低",
+  medium: "中",
+  high: "高",
+};
+
+function displayPredictionDate(date: string | null) {
+  return date?.replaceAll("-", "/") ?? "—";
+}
+
+function thresholdPredictionLabel(prediction: WearThresholdPrediction) {
+  if (prediction.state === "already-reached") return "最新量測已達";
+  if (prediction.state === "not-predictable") return "暫無上升趨勢";
+  return `約 ${displayPredictionDate(prediction.date)}`;
+}
+
+function thresholdPredictionHint(prediction: WearThresholdPrediction) {
+  if (prediction.state === "already-reached") return "應依現行規範處理";
+  if (prediction.state === "not-predictable") return "需等待更多有效量測";
+  return prediction.state === "within-horizon" ? "落在模型可信範圍" : "遠期外推，僅供長期規劃";
+}
 
 function wearStatus(wear: number, mode: WearMode): RailStatus {
   const config = wearModeConfig[mode];
@@ -405,6 +429,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
   const selectedCode = railCode(selectedPoint.number, selectedRailSide);
   const selectedDisplayCode = `${directionText[selectedPoint.direction]} ${selectedCode}`;
   const selectedStatus = getWearStatus(selectedReading.wear);
+  const selectedPrediction = predictWearTrend(selectedReading.history, config.warning, config.critical);
   const allRails = monitorPoints.flatMap((point) => [point.readings.left, point.readings.right]);
   const criticalCount = allRails.filter((reading) => getWearStatus(reading.wear) === "critical").length;
   const warningCount = allRails.filter((reading) => getWearStatus(reading.wear) === "warning").length;
@@ -607,7 +632,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
             <h2>{config.title}</h2>
             <p>保留上行15個監測點，新增下行16個監測點；每個監測點皆分成左軌與右軌。</p>
           </div>
-          <div className="updated-at">資料時間 <strong>2026-07-24 16:30</strong></div>
+          <div className="updated-at wear-updated-at"><span>資料時間</span><strong>2026-07-24 16:30</strong><small>Asia/Taipei · 非即時監測</small></div>
         </div>
 
         <section className="summary-grid wear-summary-grid" aria-label={`${config.title}摘要`}>
@@ -695,6 +720,25 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
               <strong>{selectedStatus === "critical" ? "已達維修值，建議安排現場複查" : selectedStatus === "warning" ? "已達管理值，建議提高巡檢頻率" : "維持例行巡檢"}</strong>
               <p>{selectedStatus === "critical" ? `${selectedDisplayCode} 已達 ${config.critical} mm 維修值，請確認量測位置並安排研磨或更換評估。` : selectedStatus === "warning" ? `${selectedDisplayCode} 已達 ${config.warning} mm 管理值、尚未達維修值，建議觀察下次量測的增加速度。` : `${selectedDisplayCode} 目前低於 ${config.warning} mm 管理值，依原訂週期持續追蹤即可。`}</p>
             </aside>
+
+            {mode === "tread" && (
+              <section className={`wear-prediction-card confidence-${selectedPrediction.confidence}`} aria-label={`${selectedDisplayCode}未來磨耗警戒預測`}>
+                <header>
+                  <div><span className="panel-kicker">POV PREDICTION · SPARSE INSPECTION</span><h4>未來磨耗警戒預測</h4></div>
+                  <span className="wear-prediction-confidence">趨勢信心 · {predictionConfidenceText[selectedPrediction.confidence]}</span>
+                </header>
+                <div className="wear-prediction-grid">
+                  <div><span>穩健磨耗率</span><strong>+{selectedPrediction.ratePer30Days.toFixed(3)} mm／30天</strong><small>{selectedPrediction.sampleCount} 筆、跨 {selectedPrediction.observationSpanDays} 天</small></div>
+                  <div><span>90 日後預估</span><strong>{selectedPrediction.projected90DayWear.toFixed(2)} mm</strong><small>{displayPredictionDate(selectedPrediction.projected90DayDate)}</small></div>
+                  <div><span>管理值 {config.warning} mm</span><strong>{thresholdPredictionLabel(selectedPrediction.management)}</strong><small>{thresholdPredictionHint(selectedPrediction.management)}</small></div>
+                  <div><span>維修值 {config.critical} mm</span><strong>{thresholdPredictionLabel(selectedPrediction.maintenance)}</strong><small>{thresholdPredictionHint(selectedPrediction.maintenance)}</small></div>
+                </div>
+                <footer>
+                  <span><strong>可信外推至</strong> {displayPredictionDate(selectedPrediction.reliableThroughDate)}（觀測期間 3 倍，最多 3 年）</span>
+                  <p>以量測日期的 UTC 日差估算，不讀取使用者裝置時間；遠期日期不能取代現場巡檢與正式維修判定。</p>
+                </footer>
+              </section>
+            )}
           </article>
 
           <article className="panel wear-history-panel">
