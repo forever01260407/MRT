@@ -648,20 +648,18 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
         </div>
         <small>監測點 {selectedPoint.number} · {config.measurement}</small>
       </header>
-      <dl className={mode === "tread" ? "has-estimated-measurement" : undefined}>
+      <dl className="has-estimated-measurement">
         <div><dt>方向</dt><dd>{directionText[selectedPoint.direction]}</dd></div>
         <div><dt>軌別</dt><dd>{sideText[selectedRailSide]}</dd></div>
         <div className="selected-map-location"><dt>站間</dt><dd><span>{selectedPoint.from.id} {selectedPoint.from.name}</span><i>→</i><span>{selectedPoint.to.id} {selectedPoint.to.name}</span></dd></div>
         <div><dt>量測</dt><dd>{selectedReading.wear.toFixed(2)} mm</dd></div>
         <div><dt>狀態</dt><dd className={selectedStatus}>{statusText[selectedStatus]}</dd></div>
-        {mode === "tread" && (
-          <div className="selected-map-estimated-measurement">
-            <dt>預估量測</dt>
-            <dd className={currentProjection ? currentEstimatedStatus : undefined}>
-              {currentProjection ? `${currentEstimatedWear.toFixed(2)} mm` : "同步中…"}
-            </dd>
-          </div>
-        )}
+        <div className="selected-map-estimated-measurement">
+          <dt>預估量測</dt>
+          <dd className={currentProjection ? currentEstimatedStatus : undefined}>
+            {currentProjection ? `${currentEstimatedWear.toFixed(2)} mm` : "同步中…"}
+          </dd>
+        </div>
       </dl>
     </aside>
   );
@@ -777,24 +775,22 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
               <p>{selectedStatus === "critical" ? `${selectedDisplayCode} 已達 ${config.critical} mm 維修值，請確認量測位置並安排研磨或更換評估。` : selectedStatus === "warning" ? `${selectedDisplayCode} 已達 ${config.warning} mm 管理值、尚未達維修值，建議觀察下次量測的增加速度。` : `${selectedDisplayCode} 目前低於 ${config.warning} mm 管理值，依原訂週期持續追蹤即可。`}</p>
             </aside>
 
-            {mode === "tread" && (
-              <section className={`wear-prediction-card confidence-${selectedPrediction.confidence}`} aria-label={`${selectedDisplayCode}當下磨耗狀況推估`}>
-                <header>
-                  <div><span className="panel-kicker">CURRENT ESTIMATE · SPARSE INSPECTION</span><h4>當下磨耗狀況推估</h4></div>
-                  <span className="wear-prediction-confidence">趨勢信心 · {predictionConfidenceText[selectedPrediction.confidence]}</span>
-                </header>
-                <div className="wear-prediction-grid">
-                  <div><span>穩健磨耗率</span><strong>+{selectedPrediction.ratePer30Days.toFixed(3)} mm／30天</strong><small>{selectedPrediction.sampleCount} 筆、跨 {selectedPrediction.observationSpanDays} 天</small></div>
-                  <div><span>當下預估</span><strong>{currentProjection ? `${currentEstimatedWear.toFixed(2)} mm` : "同步中…"}</strong><small>{currentTaipeiTime}</small></div>
-                  <div><span>距最近量測</span><strong>{currentProjection ? `${Math.floor(currentProjection.elapsedDays)} 天` : "同步中…"}</strong><small>最近量測 {selectedPrediction.latestDate}</small></div>
-                  <div><span>當下判定</span><strong className={`wear-prediction-current-status ${currentEstimatedStatus}`}>{currentProjection ? statusText[currentEstimatedStatus] : "同步中…"}</strong><small>{currentProjection ? currentEstimatedStatus === "critical" ? `已達 ${config.critical} mm 維修值` : currentEstimatedStatus === "warning" ? `已達 ${config.warning} mm 管理值` : `低於 ${config.warning} mm 管理值` : "等待目前時間"}</small></div>
-                </div>
-                <footer>
-                  <span><strong>當下推估範圍</strong> {currentProjection ? currentProjection.withinReliableHorizon ? "仍在可信範圍" : "已超出可信範圍" : "同步中…"}</span>
-                  <p>從最近量測日推估至 Cloudflare 同步的台北現在時間；當下推估不能取代現場巡檢與正式維修判定。</p>
-                </footer>
-              </section>
-            )}
+            <section className={`wear-prediction-card confidence-${selectedPrediction.confidence}`} aria-label={`${selectedDisplayCode}當下磨耗狀況推估`}>
+              <header>
+                <div><span className="panel-kicker">CURRENT ESTIMATE · SPARSE INSPECTION</span><h4>當下磨耗狀況推估</h4></div>
+                <span className="wear-prediction-confidence">趨勢信心 · {predictionConfidenceText[selectedPrediction.confidence]}</span>
+              </header>
+              <div className="wear-prediction-grid">
+                <div><span>穩健磨耗率</span><strong>+{selectedPrediction.ratePer30Days.toFixed(3)} mm／30天</strong><small>{selectedPrediction.sampleCount} 筆、跨 {selectedPrediction.observationSpanDays} 天</small></div>
+                <div><span>當下預估</span><strong>{currentProjection ? `${currentEstimatedWear.toFixed(2)} mm` : "同步中…"}</strong><small>{currentTaipeiTime}</small></div>
+                <div><span>距最近量測</span><strong>{currentProjection ? `${Math.floor(currentProjection.elapsedDays)} 天` : "同步中…"}</strong><small>最近量測 {selectedPrediction.latestDate}</small></div>
+                <div><span>當下判定</span><strong className={`wear-prediction-current-status ${currentEstimatedStatus}`}>{currentProjection ? statusText[currentEstimatedStatus] : "同步中…"}</strong><small>{currentProjection ? currentEstimatedStatus === "critical" ? `已達 ${config.critical} mm 維修值` : currentEstimatedStatus === "warning" ? `已達 ${config.warning} mm 管理值` : `低於 ${config.warning} mm 管理值` : "等待目前時間"}</small></div>
+              </div>
+              <footer>
+                <span><strong>當下推估範圍</strong> {currentProjection ? currentProjection.withinReliableHorizon ? "仍在可信範圍" : "已超出可信範圍" : "同步中…"}</span>
+                <p>從最近量測日推估至 Cloudflare 同步的台北現在時間；當下推估不能取代現場巡檢與正式維修判定。</p>
+              </footer>
+            </section>
           </article>
 
           <article className="panel wear-history-panel">

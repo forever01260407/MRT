@@ -140,7 +140,7 @@ test("server-renders the complete append-only record monitor", async () => {
   assert.match(html, /切換為 LB1 到 MOK10 的設備順序/);
 });
 
-test("server-renders a Cloudflare-synchronized current tread-wear estimate", async () => {
+test("server-renders Cloudflare-synchronized current tread and side-wear estimates", async () => {
   const response = await render("/wear");
   assert.equal(response.status, 200);
   const html = await response.text();
@@ -158,7 +158,13 @@ test("server-renders a Cloudflare-synchronized current tread-wear estimate", asy
 
   const sideResponse = await render("/side-wear");
   assert.equal(sideResponse.status, 200);
-  assert.doesNotMatch(await sideResponse.text(), /預估量測/);
+  const sideHtml = await sideResponse.text();
+  assert.match(sideHtml, /側面軌道總覽/);
+  assert.match(sideHtml, /側向磨耗（側邊）/);
+  assert.match(sideHtml, /預估量測/);
+  assert.match(sideHtml, /當下磨耗狀況推估/);
+  assert.match(sideHtml, /管理值 (?:<!-- -->)?6.5(?:<!-- -->)? mm/);
+  assert.match(sideHtml, /維修值 (?:<!-- -->)?8(?:\.0)?(?:<!-- -->)? mm/);
 });
 
 test("returns the current Cloudflare time as uncached UTC with Taipei metadata", async () => {
