@@ -23,14 +23,18 @@ export type WearPrediction = {
   latestWear: number;
   ratePerDay: number;
   ratePer30Days: number;
-  projected90DayDate: string;
-  projected90DayWear: number;
   confidence: WearPredictionConfidence;
   resetDetected: boolean;
   reliableHorizonDays: number;
   reliableThroughDate: string;
   management: WearThresholdPrediction;
   maintenance: WearThresholdPrediction;
+};
+
+export type WearCurrentProjection = {
+  elapsedDays: number;
+  wear: number;
+  withinReliableHorizon: boolean;
 };
 
 type NormalizedSample = WearPredictionSample & { timestamp: number };
@@ -53,6 +57,29 @@ function formatDateOnly(timestamp: number) {
 
 function addDays(timestamp: number, days: number) {
   return timestamp + days * DAY_IN_MS;
+}
+
+/**
+ * Projects wear from the latest date-only inspection to an exact current
+ * instant. The latest inspection is anchored to local midnight in the chosen
+ * fixed-offset timezone; Taipei uses +480 minutes and has no daylight saving.
+ */
+export function projectWearAtTime(
+  prediction: WearPrediction,
+  currentEpochMs: number,
+  timezoneOffsetMinutes = 480,
+): WearCurrentProjection {
+  const latestCalendarDate = parseDateOnly(prediction.latestDate);
+  if (latestCalendarDate === null || !Number.isFinite(currentEpochMs)) {
+    throw new Error("A valid current timestamp is required.");
+  }
+  const latestLocalMidnightEpochMs = latestCalendarDate - timezoneOffsetMinutes * 60_000;
+  const elapsedDays = Math.max(0, (currentEpochMs - latestLocalMidnightEpochMs) / DAY_IN_MS);
+  return {
+    elapsedDays,
+    wear: prediction.latestWear + prediction.ratePerDay * elapsedDays,
+    withinReliableHorizon: elapsedDays <= prediction.reliableHorizonDays,
+  };
 }
 
 function median(values: number[]) {
@@ -132,8 +159,6 @@ export function predictWearTrend(
         ? "medium"
         : "low";
   const reliableHorizonDays = Math.min(1_095, Math.max(180, Math.round(observationSpanDays * 3)));
-  const projected90DayDate = formatDateOnly(addDays(latest.timestamp, 90));
-
   return {
     method: "theil-sen-daily",
     sampleCount: usable.length,
@@ -142,8 +167,6 @@ export function predictWearTrend(
     latestWear: latest.wear,
     ratePerDay,
     ratePer30Days: ratePerDay * 30,
-    projected90DayDate,
-    projected90DayWear: latest.wear + ratePerDay * 90,
     confidence,
     resetDetected: resetIndex > 0,
     reliableHorizonDays,

@@ -1411,6 +1411,9 @@ button:focus-visible {
 .wear-prediction-grid > div { min-width: 0; padding: 12px; display: grid; gap: 5px; border: 1px solid rgba(216, 211, 255, .82); border-radius: 10px; background: rgba(255, 255, 255, .78); }
 .wear-prediction-grid span { color: var(--muted); font-size: 10px; }
 .wear-prediction-grid strong { color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
+.wear-prediction-current-status.normal { color: #087b59; }
+.wear-prediction-current-status.warning { color: #9c6400; }
+.wear-prediction-current-status.critical { color: #b32643; }
 .wear-prediction-grid small { color: var(--ink-soft); font-size: 9px; line-height: 1.45; }
 .wear-prediction-card > footer { margin-top: 11px; padding-top: 10px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-top: 1px solid #e2defb; color: var(--muted); font-size: 9px; line-height: 1.55; }
 .wear-prediction-card > footer span { white-space: nowrap; }

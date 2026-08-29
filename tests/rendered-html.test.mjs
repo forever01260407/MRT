@@ -140,17 +140,30 @@ test("server-renders the complete append-only record monitor", async () => {
   assert.match(html, /切換為 LB1 到 MOK10 的設備順序/);
 });
 
-test("server-renders a sparse-inspection tread-wear forecast without trusting the browser clock", async () => {
+test("server-renders a Cloudflare-synchronized current tread-wear estimate", async () => {
   const response = await render("/wear");
   assert.equal(response.status, 200);
   const html = await response.text();
 
-  assert.match(html, /未來磨耗警戒預測/);
+  assert.match(html, /當下磨耗狀況推估/);
   assert.match(html, /穩健磨耗率/);
-  assert.match(html, /90 日後預估/);
-  assert.match(html, /可信外推至/);
-  assert.match(html, /不讀取使用者裝置時間/);
-  assert.match(html, /Asia\/Taipei · 非即時監測/);
+  assert.match(html, /當下預估/);
+  assert.match(html, /距最近量測/);
+  assert.match(html, /當下判定/);
+  assert.match(html, /正在向 Cloudflare 同步/);
+  assert.doesNotMatch(html, /90 日後預估/);
+  assert.doesNotMatch(html, /約 2038\/|約 2040\//);
+});
+
+test("returns the current Cloudflare time as uncached UTC with Taipei metadata", async () => {
+  const response = await render("/api/time");
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("cache-control") ?? "", /no-store/);
+  const payload = await response.json();
+
+  assert.equal(payload.timeZone, "Asia/Taipei");
+  assert.equal(payload.utcOffset, "+08:00");
+  assert.ok(Number.isFinite(Date.parse(payload.now)));
 });
 
 test("requires a rate-limited runtime secret before permanently deleting a record", async () => {

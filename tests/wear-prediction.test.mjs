@@ -29,9 +29,15 @@ test("uses elapsed calendar days instead of treating sparse inspections as evenl
       { date: "2026-01-11", wear: 1.1 },
       { date: "2026-02-10", wear: 1.4 },
     ], 2, 3);
+    const current = predictionModule.projectWearAtTime(
+      prediction,
+      Date.parse("2026-02-19T16:00:00.000Z"),
+    );
 
     assert.ok(Math.abs(prediction.ratePerDay - 0.01) < 1e-10);
-    assert.ok(Math.abs(prediction.projected90DayWear - 2.3) < 1e-10);
+    assert.equal(current.elapsedDays, 10);
+    assert.ok(Math.abs(current.wear - 1.5) < 1e-10);
+    assert.equal(current.withinReliableHorizon, true);
     assert.equal(prediction.management.state, "within-horizon");
     assert.equal(prediction.management.date, "2026-04-11");
   } finally {
@@ -49,9 +55,13 @@ test("median pairwise slope resists a single abnormal measurement", async () => 
       { date: "2026-01-31", wear: 1.3 },
       { date: "2026-02-10", wear: 1.4 },
     ], 2, 3);
+    const current = predictionModule.projectWearAtTime(
+      prediction,
+      Date.parse("2026-02-19T16:00:00.000Z"),
+    );
 
     assert.ok(Math.abs(prediction.ratePerDay - 0.01) < 1e-10);
-    assert.ok(prediction.projected90DayWear < 2.4);
+    assert.ok(current.wear < 1.6);
   } finally {
     await cleanup();
   }
