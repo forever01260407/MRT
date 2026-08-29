@@ -151,8 +151,14 @@ test("server-renders a Cloudflare-synchronized current tread-wear estimate", asy
   assert.match(html, /距最近量測/);
   assert.match(html, /當下判定/);
   assert.match(html, /正在向 Cloudflare 同步/);
+  assert.match(html, /預估量測/);
+  assert.match(html, /同步中…/);
   assert.doesNotMatch(html, /90 日後預估/);
   assert.doesNotMatch(html, /約 2038\/|約 2040\//);
+
+  const sideResponse = await render("/side-wear");
+  assert.equal(sideResponse.status, 200);
+  assert.doesNotMatch(await sideResponse.text(), /預估量測/);
 });
 
 test("returns the current Cloudflare time as uncached UTC with Taipei metadata", async () => {

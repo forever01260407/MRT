@@ -648,12 +648,20 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
         </div>
         <small>監測點 {selectedPoint.number} · {config.measurement}</small>
       </header>
-      <dl>
+      <dl className={mode === "tread" ? "has-estimated-measurement" : undefined}>
         <div><dt>方向</dt><dd>{directionText[selectedPoint.direction]}</dd></div>
         <div><dt>軌別</dt><dd>{sideText[selectedRailSide]}</dd></div>
         <div className="selected-map-location"><dt>站間</dt><dd><span>{selectedPoint.from.id} {selectedPoint.from.name}</span><i>→</i><span>{selectedPoint.to.id} {selectedPoint.to.name}</span></dd></div>
         <div><dt>量測</dt><dd>{selectedReading.wear.toFixed(2)} mm</dd></div>
         <div><dt>狀態</dt><dd className={selectedStatus}>{statusText[selectedStatus]}</dd></div>
+        {mode === "tread" && (
+          <div className="selected-map-estimated-measurement">
+            <dt>預估量測</dt>
+            <dd className={currentProjection ? currentEstimatedStatus : undefined}>
+              {currentProjection ? `${currentEstimatedWear.toFixed(2)} mm` : "同步中…"}
+            </dd>
+          </div>
+        )}
       </dl>
     </aside>
   );
