@@ -108,3 +108,28 @@ test("marks long-range rail warning dates as outside the credible horizon", asyn
     await cleanup();
   }
 });
+
+test("projects a measured-normal side rail into the current warning range", async () => {
+  const { predictionModule, cleanup } = await loadPredictionModule();
+  try {
+    const prediction = predictionModule.predictWearTrend([
+      { date: "2026-01-18", wear: 4.72 },
+      { date: "2026-02-27", wear: 4.93 },
+      { date: "2026-04-14", wear: 5.15 },
+      { date: "2026-05-01", wear: 5.39 },
+      { date: "2026-05-29", wear: 5.65 },
+      { date: "2026-06-21", wear: 5.92 },
+      { date: "2026-07-24", wear: 6.20 },
+    ], 6.5, 8);
+    const current = predictionModule.projectWearAtTime(
+      prediction,
+      Date.parse("2026-08-29T08:00:00.000Z"),
+    );
+
+    assert.equal(prediction.latestWear < 6.5, true);
+    assert.ok(current.wear >= 6.5 && current.wear < 8);
+    assert.ok(current.wear > 6.51 && current.wear < 6.52);
+  } finally {
+    await cleanup();
+  }
+});

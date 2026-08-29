@@ -381,6 +381,23 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
   const config = wearModeConfig[mode];
   const monitorPoints = mode === "side" ? [...sideUpMonitorPoints, ...sideDownMonitorPoints] : [...treadUpMonitorPoints, ...treadDownMonitorPoints];
   const getWearStatus = (wear: number) => wearStatus(wear, mode);
+  const currentRailEstimates = useMemo(() => {
+    const activeConfig = wearModeConfig[mode];
+    const activePoints = mode === "side" ? [...sideUpMonitorPoints, ...sideDownMonitorPoints] : [...treadUpMonitorPoints, ...treadDownMonitorPoints];
+    const estimates = new Map<string, { wear: number; status: RailStatus }>();
+    for (const point of activePoints) {
+      for (const side of ["left", "right"] as RailSide[]) {
+        const reading = point.readings[side];
+        const prediction = predictWearTrend(reading.history, activeConfig.warning, activeConfig.critical);
+        const projection = currentEpochMs === null ? null : projectWearAtTime(prediction, currentEpochMs);
+        const wear = projection?.wear ?? reading.wear;
+        estimates.set(railKey(point.direction, point.number, side), { wear, status: wearStatus(wear, mode) });
+      }
+    }
+    return estimates;
+  }, [currentEpochMs, mode]);
+  const getCurrentRailEstimate = (point: MonitorPoint, side: RailSide) => currentRailEstimates.get(railKey(point.direction, point.number, side))
+    ?? { wear: point.readings[side].wear, status: getWearStatus(point.readings[side].wear) };
 
   useEffect(() => {
     let disposed = false;
@@ -471,21 +488,26 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
   const selectedReading = selectedPoint.readings[selectedRailSide];
   const selectedCode = railCode(selectedPoint.number, selectedRailSide);
   const selectedDisplayCode = `${directionText[selectedPoint.direction]} ${selectedCode}`;
-  const selectedStatus = getWearStatus(selectedReading.wear);
+  const selectedEstimate = getCurrentRailEstimate(selectedPoint, selectedRailSide);
   const selectedPrediction = predictWearTrend(selectedReading.history, config.warning, config.critical);
   const currentProjection = currentEpochMs === null ? null : projectWearAtTime(selectedPrediction, currentEpochMs);
-  const currentEstimatedWear = currentProjection?.wear ?? selectedReading.wear;
-  const currentEstimatedStatus = getWearStatus(currentEstimatedWear);
+  const currentEstimatedWear = selectedEstimate.wear;
+  const currentEstimatedStatus = selectedEstimate.status;
+  const selectedStatus = currentEstimatedStatus;
   const currentTaipeiTime = currentEpochMs === null ? "時間同步中…" : formatTaipeiDateTime(currentEpochMs);
   const clockSourceText = clockSyncState === "cloudflare" ? "Cloudflare 時間同步" : clockSyncState === "fallback" ? "裝置時間備援" : "正在向 Cloudflare 同步";
-  const allRails = monitorPoints.flatMap((point) => [point.readings.left, point.readings.right]);
-  const criticalCount = allRails.filter((reading) => getWearStatus(reading.wear) === "critical").length;
-  const warningCount = allRails.filter((reading) => getWearStatus(reading.wear) === "warning").length;
-  const normalCount = allRails.length - criticalCount - warningCount;
-  const criticalRails = monitorPoints
-    .flatMap((point) => (["left", "right"] as RailSide[]).map((side) => ({ point, side, reading: point.readings[side] })))
-    .filter(({ reading }) => getWearStatus(reading.wear) === "critical")
-    .sort((a, b) => b.reading.wear - a.reading.wear);
+  const currentRails = monitorPoints.flatMap((point) => (["left", "right"] as RailSide[]).map((side) => ({
+    point,
+    side,
+    reading: point.readings[side],
+    estimate: getCurrentRailEstimate(point, side),
+  })));
+  const criticalCount = currentRails.filter(({ estimate }) => estimate.status === "critical").length;
+  const warningCount = currentRails.filter(({ estimate }) => estimate.status === "warning").length;
+  const normalCount = currentRails.length - criticalCount - warningCount;
+  const criticalRails = currentRails
+    .filter(({ estimate }) => estimate.status === "critical")
+    .sort((a, b) => b.estimate.wear - a.estimate.wear);
 
   const selectRail = (point: MonitorPoint, side: RailSide) => {
     setSelectedDirection(point.direction);
@@ -515,7 +537,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
   const stationStatus = (station: Station) => {
     const adjacent = monitorPoints.filter((point) => point.from.id === station.id || point.to.id === station.id);
     if (!adjacent.length) return "unknown";
-    return worstStatus(adjacent.flatMap((point) => [getWearStatus(point.readings.left.wear), getWearStatus(point.readings.right.wear)]));
+    return worstStatus(adjacent.flatMap((point) => [getCurrentRailEstimate(point, "left").status, getCurrentRailEstimate(point, "right").status]));
   };
 
   const renderTopology = (activeLayout: RouteLayout) => (
@@ -531,6 +553,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
           if (!segmentPoints.length) return <span className={`fallback-track unknown ${filteredOut ? "filtered-out" : ""}`} aria-hidden="true"></span>;
           return segmentPoints.map((point) => {
             const reading = point.readings[side];
+            const estimate = getCurrentRailEstimate(point, side);
             const code = railCode(point.number, side);
             const mapCode = mapRailCode(direction, point.number, side);
             const selected = selectedDirection === direction && selectedPointNumber === point.number && selectedRailSide === side;
@@ -538,11 +561,11 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
               <button
                 type="button"
                 key={railKey(direction, point.number, side)}
-                className={`device-track ${getWearStatus(reading.wear)} ${selected ? "selected" : ""} ${filteredOut ? "filtered-out" : ""}`}
+                className={`device-track ${estimate.status} ${selected ? "selected" : ""} ${filteredOut ? "filtered-out" : ""}`}
                 onClick={(event) => { event.stopPropagation(); selectRail(point, side); }}
                 aria-pressed={selected}
-                title={`${directionText[direction]} ${code}｜${sideText[side]}｜${config.measurement} ${reading.wear} mm｜${statusText[getWearStatus(reading.wear)]}`}
-                aria-label={`${directionText[direction]} ${code}，${sideText[side]}，${config.measurement} ${reading.wear} 毫米，${statusText[getWearStatus(reading.wear)]}`}
+                title={`${directionText[direction]} ${code}｜${sideText[side]}｜實測 ${reading.wear.toFixed(2)} mm｜當下預估 ${estimate.wear.toFixed(2)} mm｜${statusText[estimate.status]}`}
+                aria-label={`${directionText[direction]} ${code}，${sideText[side]}，實測 ${reading.wear.toFixed(2)} 毫米，當下預估 ${estimate.wear.toFixed(2)} 毫米，${statusText[estimate.status]}`}
               >
                 <span className={`device-track-label wear-label-${direction}-${side}`} style={{ transform: `translateX(-50%) rotate(${-geometry.angle}deg)` }}>{mapCode}</span>
               </button>
@@ -690,10 +713,10 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
         </div>
 
         <section className="summary-grid wear-summary-grid" aria-label={`${config.title}摘要`}>
-          <article className="summary-card danger-card"><span>達維修值軌道</span><strong>{criticalCount}</strong><small>{config.critical} mm 以上</small></article>
-          <article className="summary-card warning-card"><span>達管理值軌道</span><strong>{warningCount}</strong><small>{config.warning} mm 以上、未達 {config.critical} mm</small></article>
-          <article className="summary-card"><span>正常軌道</span><strong>{normalCount}</strong><small>低於 {config.warning} mm</small></article>
-          <article className="summary-card"><span>監測軌道總數</span><strong>{allRails.length}</strong><small>上行15點＋下行16點 × 左右軌</small></article>
+          <article className="summary-card danger-card"><span>達維修值軌道</span><strong>{criticalCount}</strong><small>當下預估 · {config.critical} mm 以上</small></article>
+          <article className="summary-card warning-card"><span>達管理值軌道</span><strong>{warningCount}</strong><small>當下預估 · {config.warning} mm 以上、未達 {config.critical} mm</small></article>
+          <article className="summary-card"><span>正常軌道</span><strong>{normalCount}</strong><small>當下預估 · 低於 {config.warning} mm</small></article>
+          <article className="summary-card"><span>監測軌道總數</span><strong>{currentRails.length}</strong><small>上行15點＋下行16點 × 左右軌</small></article>
         </section>
 
         <section className="workspace-grid" ref={workspaceRef}>
@@ -734,9 +757,10 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
                 <article key={`${point.direction}-${point.number}`} className={selectedDirection === point.direction && selectedPointNumber === point.number ? "selected" : ""}>
                   <strong>{directionText[point.direction]}監測點 {point.number} · {point.from.name}－{point.to.name}</strong>
                   <div>
-                    {(["left", "right"] as RailSide[]).map((side) => (
-                      <button key={side} type="button" className={getWearStatus(point.readings[side].wear)} onClick={() => selectRail(point, side)}>{mapRailCode(point.direction, point.number, side)} {point.readings[side].wear} mm</button>
-                    ))}
+                    {(["left", "right"] as RailSide[]).map((side) => {
+                      const estimate = getCurrentRailEstimate(point, side);
+                      return <button key={side} type="button" className={estimate.status} onClick={() => selectRail(point, side)}>{mapRailCode(point.direction, point.number, side)} 預估 {estimate.wear.toFixed(2)} mm</button>;
+                    })}
                   </div>
                 </article>
               ))}
@@ -765,14 +789,14 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
             </div>
 
             <div className="wear-gauge-card">
-              <div><strong>{selectedDisplayCode} {config.measurement}程度</strong><span>{Math.round(selectedReading.wear / config.scaleMax * 100)}%</span></div>
-              <div className="wear-gauge" style={{ background: `linear-gradient(90deg, #dcf7ec 0 ${config.warning / config.scaleMax * 100}%, #fff3d7 ${config.warning / config.scaleMax * 100}% ${config.critical / config.scaleMax * 100}%, #ffe2e8 ${config.critical / config.scaleMax * 100}% 100%)` }}><i className={selectedStatus} style={{ width: `${Math.min(100, selectedReading.wear / config.scaleMax * 100)}%` }}></i><b className="management-marker" style={{ left: `${config.warning / config.scaleMax * 100}%` }}></b><b className="maintenance-marker" style={{ left: `${config.critical / config.scaleMax * 100}%` }}></b></div>
+              <div><strong>{selectedDisplayCode} 當下預估程度</strong><span>{Math.round(currentEstimatedWear / config.scaleMax * 100)}%</span></div>
+              <div className="wear-gauge" style={{ background: `linear-gradient(90deg, #dcf7ec 0 ${config.warning / config.scaleMax * 100}%, #fff3d7 ${config.warning / config.scaleMax * 100}% ${config.critical / config.scaleMax * 100}%, #ffe2e8 ${config.critical / config.scaleMax * 100}% 100%)` }}><i className={selectedStatus} style={{ width: `${Math.min(100, currentEstimatedWear / config.scaleMax * 100)}%` }}></i><b className="management-marker" style={{ left: `${config.warning / config.scaleMax * 100}%` }}></b><b className="maintenance-marker" style={{ left: `${config.critical / config.scaleMax * 100}%` }}></b></div>
               <div className="wear-gauge-scale"><span>0 mm</span><span>管理值 {config.warning} mm</span><span>維修值 {config.critical} mm</span><span>{config.scaleMax} mm</span></div>
             </div>
 
             <aside className={`wear-maintenance-note ${selectedStatus}`}>
-              <strong>{selectedStatus === "critical" ? "已達維修值，建議安排現場複查" : selectedStatus === "warning" ? "已達管理值，建議提高巡檢頻率" : "維持例行巡檢"}</strong>
-              <p>{selectedStatus === "critical" ? `${selectedDisplayCode} 已達 ${config.critical} mm 維修值，請確認量測位置並安排研磨或更換評估。` : selectedStatus === "warning" ? `${selectedDisplayCode} 已達 ${config.warning} mm 管理值、尚未達維修值，建議觀察下次量測的增加速度。` : `${selectedDisplayCode} 目前低於 ${config.warning} mm 管理值，依原訂週期持續追蹤即可。`}</p>
+              <strong>{selectedStatus === "critical" ? "當下預估已達維修值，建議安排現場複查" : selectedStatus === "warning" ? "當下預估已達管理值，建議提高巡檢頻率" : "當下預估正常，維持例行巡檢"}</strong>
+              <p>{selectedStatus === "critical" ? `${selectedDisplayCode} 當下預估 ${currentEstimatedWear.toFixed(2)} mm，已達 ${config.critical} mm 維修值，請確認量測位置並安排研磨或更換評估。` : selectedStatus === "warning" ? `${selectedDisplayCode} 當下預估 ${currentEstimatedWear.toFixed(2)} mm，已達 ${config.warning} mm 管理值、尚未達維修值，建議提高巡檢頻率。` : `${selectedDisplayCode} 當下預估 ${currentEstimatedWear.toFixed(2)} mm，低於 ${config.warning} mm 管理值，依原訂週期持續追蹤即可。`}</p>
             </aside>
 
             <section className={`wear-prediction-card confidence-${selectedPrediction.confidence}`} aria-label={`${selectedDisplayCode}當下磨耗狀況推估`}>
@@ -820,13 +844,13 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
             <span className="alerts-count">{criticalRails.length} 條軌道達維修值</span>
           </div>
           <div className="alerts-table" role="table" aria-label={`${config.measurement}紅色異常軌道清單`}>
-            <div className="table-row table-head" role="row"><span>軌道</span><span>目前磨耗量</span><span>軌道位置</span><span>相比前次</span><span>操作</span></div>
-            {criticalRails.map(({ point, side, reading }) => {
+            <div className="table-row table-head" role="row"><span>軌道</span><span>當下預估量</span><span>軌道位置</span><span>最近實測變化</span><span>操作</span></div>
+            {criticalRails.map(({ point, side, reading, estimate }) => {
               const code = `${directionText[point.direction]} ${railCode(point.number, side)}`;
               return (
                 <div className="table-row" role="row" key={railKey(point.direction, point.number, side)}>
                   <strong>{code}</strong>
-                  <span><b className="danger-text">{reading.wear.toFixed(2)} mm</b></span>
+                  <span><b className="danger-text">{estimate.wear.toFixed(2)} mm</b></span>
                   <span>{point.from.id} {point.from.name}－{point.to.id} {point.to.name}</span>
                   <span className="danger-text">+{reading.change.toFixed(2)} mm</span>
                   <button type="button" className="table-action" onClick={() => locateRailOnMap(point, side)}>在圖上定位</button>

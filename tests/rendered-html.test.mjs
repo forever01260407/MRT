@@ -167,6 +167,19 @@ test("server-renders Cloudflare-synchronized current tread and side-wear estimat
   assert.match(sideHtml, /維修值 (?:<!-- -->)?8(?:\.0)?(?:<!-- -->)? mm/);
 });
 
+test("colors current rail status surfaces from the projected value", async () => {
+  const page = await readFile(new URL("../app/wear/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /const currentRailEstimates = useMemo/);
+  assert.match(page, /const selectedStatus = currentEstimatedStatus/);
+  assert.match(page, /className={`device-track \${estimate\.status}/);
+  assert.match(page, /criticalCount = currentRails\.filter\(\(\{ estimate \}\) => estimate\.status/);
+  assert.match(page, /getCurrentRailEstimate\(point, "left"\)\.status/);
+  assert.match(page, /selectedDisplayCode} 當下預估程度/);
+  assert.match(page, /const pointStatus = getWearStatus\(point\.wear\)/);
+  assert.doesNotMatch(page, /className=\{getWearStatus\(point\.readings\[side\]\.wear\)\}/);
+});
+
 test("returns the current Cloudflare time as uncached UTC with Taipei metadata", async () => {
   const response = await render("/api/time");
   assert.equal(response.status, 200);
