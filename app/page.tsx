@@ -310,11 +310,6 @@ function segmentWeight(segment: Segment) {
   return 1 + 0.75 * segmentSlotCount(segment);
 }
 
-function stationStatus(stationIndex: number, sourceSegments: Segment[] = segments) {
-  const adjacent = sourceSegments.filter((segment) => segment.from === stationIndex || segment.to === stationIndex);
-  return worstStatus(adjacent.map(segmentStatus));
-}
-
 function formatChange(change: number) {
   if (change === 0) return "無變動";
   return `${change > 0 ? "+" : ""}${change} L`;
@@ -680,6 +675,7 @@ export default function Home() {
   const [activeSegments, setActiveSegments] = useState<Segment[]>(segments);
   const [deviceAxleProfiles, setDeviceAxleProfiles] = useState<DeviceAxleProfile[]>([]);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
+  const [excelImportPassword, setExcelImportPassword] = useState("");
   const [excelImport, setExcelImport] = useState<ExcelImportState>({
     status: "loading",
     message: "正在從 D1 永久資料庫讀取潤滑紀錄…",
@@ -1177,6 +1173,7 @@ export default function Home() {
   const handleExcelImport = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    setExcelImportPassword("");
     setExcelImport({ status: "loading", message: `正在讀取 ${file.name}…`, fileName: file.name });
 
     try {
@@ -1213,12 +1210,21 @@ export default function Home() {
 
   const confirmExcelImport = async () => {
     if (!pendingImport) return;
+    if (!excelImportPassword.trim()) {
+      setExcelImport((current) => ({
+        ...current,
+        status: "error",
+        message: "請輸入網站管理密碼後再寫入 D1。",
+        errors: ["網站管理密碼為必填。"],
+      }));
+      return;
+    }
     setExcelImport((current) => ({ ...current, status: "saving", message: `正在比對並寫入 ${pendingImport.fileName}…`, errors: undefined }));
     try {
       const response = await fetch("/api/lubrication", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(pendingImport),
+        body: JSON.stringify({ ...pendingImport, password: excelImportPassword.trim() }),
       });
       const payload = await response.json() as {
         records?: LubricationRecord[];
@@ -1236,6 +1242,7 @@ export default function Home() {
       const insertedCount = payload.insertedCount ?? 0;
       const duplicateCount = payload.duplicateCount ?? 0;
       setPendingImport(null);
+      setExcelImportPassword("");
       setExcelImport({
         status: "success",
         message: `D1 寫入完成：新增 ${insertedCount} 筆、略過 ${duplicateCount} 筆相同資料；資料庫目前共有 ${payload.records.length} 筆。`,
@@ -1261,6 +1268,7 @@ export default function Home() {
 
   const cancelPendingImport = () => {
     setPendingImport(null);
+    setExcelImportPassword("");
     setExcelImport((current) => ({
       status: "success",
       message: "已取消這次匯入；D1 內既有資料沒有變動。",
@@ -1469,7 +1477,6 @@ export default function Home() {
         const point = activeLayout.stationPoints[station.id];
         if (!point) return null;
         const active = selectedSegment.from === index || selectedSegment.to === index;
-        const state = stationStatus(index, activeSegments);
         return (
           <div
             className={`map-station station-${station.id.toLowerCase()} label-${point.labelSide} ${active ? "selected" : ""}`}
@@ -1479,7 +1486,6 @@ export default function Home() {
           >
             <span className="station-node">{station.id}</span>
             <span className="station-label"><strong>{station.name}</strong><small>{station.id}</small></span>
-            <i className={`station-state ${state}`}></i>
           </div>
         );
       })}
@@ -1504,6 +1510,7 @@ export default function Home() {
           <a href="/" className="nav-item active" aria-current="page">潤滑設備總覽</a>
           <a href="/wear" className="nav-item">正面軌道總覽</a>
           <a href="/side-wear" className="nav-item">側面軌道總覽</a>
+          <a href="/admin-area" className="nav-item admin-nav-item" data-requires-role="admin">ADMIN AREA</a>
         </nav>
         <div className="sync-state"><span className="pulse-dot"></span>{excelImport.status === "success" ? "D1 永久資料庫已同步" : excelImport.status === "loading" || excelImport.status === "saving" ? "資料庫同步中" : "資料庫等待確認"}</div>
       </header>
@@ -1552,6 +1559,7 @@ export default function Home() {
                 {excelImport.status === "loading" ? "讀取中…" : pendingImport ? "重新選擇 Excel" : "選擇 Excel 匯入"}
               </button>
               <input ref={excelInputRef} className="visually-hidden-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleExcelImport} />
+              {pendingImport ? <label className="excel-import-password"><span>網站管理密碼</span><input type="password" autoComplete="off" value={excelImportPassword} onChange={(event) => setExcelImportPassword(event.target.value)} disabled={excelImport.status === "saving"} placeholder="輸入後確認寫入" aria-label="Excel 匯入網站管理密碼" /></label> : null}
               {pendingImport ? <button type="button" className="excel-confirm-button" onClick={confirmExcelImport} disabled={excelImport.status === "saving"}>{excelImport.status === "saving" ? "寫入中…" : "確認寫入 D1"}</button> : null}
               {pendingImport ? <button type="button" className="excel-reset-button" onClick={cancelPendingImport} disabled={excelImport.status === "saving"}>取消</button> : null}
             </div>

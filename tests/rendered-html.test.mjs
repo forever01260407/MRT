@@ -140,6 +140,22 @@ test("server-renders the complete append-only record monitor", async () => {
   assert.match(html, /切換為 LB1 到 MOK10 的設備順序/);
 });
 
+test("server-renders the reserved admin area and four-role plan", async () => {
+  const response = await render("/admin-area");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  assert.match(html, /帳號與權限管理/);
+  assert.match(html, /ADMIN ONLY/);
+  assert.match(html, /data-requires-role="admin"/);
+  assert.match(html, />user</);
+  assert.match(html, />userpro</);
+  assert.match(html, />supervisor</);
+  assert.match(html, />admin</);
+  assert.match(html, /只有 admin 可以建立帳號/);
+  assert.match(html, /登入後不重複輸入功能密碼/);
+});
+
 test("server-renders Cloudflare-synchronized current tread and side-wear estimates", async () => {
   const response = await render("/wear");
   assert.equal(response.status, 200);
@@ -200,7 +216,6 @@ test("requires a rate-limited runtime secret before permanently deleting a recor
 
   assert.match(route, /export async function DELETE/);
   assert.match(deleteHandler, /authorizeDeleteRequest/);
-  assert.doesNotMatch(deleteHandler, /getChatGPTUser/);
   assert.doesNotMatch(route, /const DELETE_PASSWORD\s*=/);
   assert.match(authorization, /DELETE_PASSWORD\?: string/);
   assert.match(authorization, /DELETE_RATE_LIMITER/);
@@ -227,13 +242,35 @@ test("sorts monitor records by natural device order on demand", async () => {
 test("stores corrections as immutable measurement revisions", async () => {
   const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
   const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/monitor/page.tsx", import.meta.url), "utf8");
+  const authorization = await readFile(new URL("../app/lib/adminWriteAuthorization.ts", import.meta.url), "utf8");
+  const viteConfig = await readFile(new URL("../vite.config.ts", import.meta.url), "utf8");
 
   assert.match(route, /export async function PATCH/);
   assert.match(route, /INSERT INTO measurement_revisions/);
   assert.match(route, /correctionReason/);
   assert.doesNotMatch(route, /UPDATE measurements SET/);
+  assert.match(route, /authorizeAdminWriteRequest/);
+  assert.match(route, /actor = payload\.correctedBy/);
+  assert.match(page, /網站管理密碼/);
+  assert.match(page, /password: correction\.password\.trim\(\)/);
+  assert.match(authorization, /ADMIN_PASSWORD\?: string/);
+  assert.match(authorization, /DELETE_PASSWORD\?: string/);
+  assert.match(authorization, /ADMIN_WRITE_RATE_LIMITER/);
+  assert.match(authorization, /timingSafeEqual/);
+  assert.match(viteConfig, /name: "ADMIN_WRITE_RATE_LIMITER"/);
   assert.match(schema, /measurementRevisions/);
   assert.match(schema, /revisionNo/);
+});
+
+test("protects Excel imports without requiring an external user account", async () => {
+  const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const postHandler = route.slice(route.indexOf("export async function POST"), route.indexOf("export async function PATCH"));
+
+  assert.match(postHandler, /authorizeAdminWriteRequest/);
+  assert.match(page, /Excel 匯入網站管理密碼/);
+  assert.match(page, /password: excelImportPassword\.trim\(\)/);
 });
 
 test("provides Turnstile-protected anonymous manual registration backed by D1", async () => {
@@ -257,8 +294,6 @@ test("provides Turnstile-protected anonymous manual registration backed by D1", 
   assert.match(route, /records:\s*\[record\]/);
   assert.match(route, /submittedCount:\s*1/);
   assert.match(route, /anonymous-pov/);
-  assert.match(route, /!isManualEntry && !user/);
-
   assert.match(turnstile, /challenges\.cloudflare\.com\/turnstile\/v0\/siteverify/);
   assert.match(turnstile, /result\.action !== MANUAL_ENTRY_TURNSTILE_ACTION/);
   assert.match(turnstile, /result\.hostname !== requestUrl\.hostname/);

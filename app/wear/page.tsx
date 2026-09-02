@@ -534,12 +534,6 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
     }
   };
 
-  const stationStatus = (station: Station) => {
-    const adjacent = monitorPoints.filter((point) => point.from.id === station.id || point.to.id === station.id);
-    if (!adjacent.length) return "unknown";
-    return worstStatus(adjacent.flatMap((point) => [getCurrentRailEstimate(point, "left").status, getCurrentRailEstimate(point, "right").status]));
-  };
-
   const renderTopology = (activeLayout: RouteLayout) => (
     <>
       {routeSegments.map((segment) => {
@@ -606,7 +600,6 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
           <div className={`map-station station-${station.id.toLowerCase()} label-${point.labelSide} ${active ? "selected" : ""}`} key={station.id} style={stationStyle}>
             <span className="station-node"><em>{station.id}</em></span>
             <span className="station-label"><strong>{station.name}</strong><small>{station.id}</small></span>
-            <i className={`station-state ${stationStatus(station)}`}></i>
           </div>
         );
       })}
@@ -698,6 +691,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
           <a href="/" className="nav-item">潤滑設備總覽</a>
           <a href="/wear" className={`nav-item ${mode === "tread" ? "active" : ""}`} aria-current={mode === "tread" ? "page" : undefined}>正面軌道總覽</a>
           <a href="/side-wear" className={`nav-item ${mode === "side" ? "active" : ""}`} aria-current={mode === "side" ? "page" : undefined}>側面軌道總覽</a>
+          <a href="/admin-area" className="nav-item admin-nav-item" data-requires-role="admin">ADMIN AREA</a>
         </nav>
         <div className="sync-state"><span className="pulse-dot"></span>上／下行 · {config.measurement} · 門檻已設定</div>
       </header>

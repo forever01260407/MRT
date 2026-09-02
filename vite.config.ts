@@ -58,12 +58,20 @@ export default defineConfig(async ({ command, mode }) => {
         namespace_id: "1003",
         simple: { limit: 10, period: 60 as const },
       },
+      {
+        name: "ADMIN_WRITE_RATE_LIMITER",
+        namespace_id: "1004",
+        simple: { limit: 10, period: 60 as const },
+      },
     ],
     ...(command === "serve"
       ? {
           vars: {
             TURNSTILE_SITE_KEY: TURNSTILE_TEST_SITE_KEY,
             TURNSTILE_SECRET_KEY: TURNSTILE_TEST_SECRET_KEY,
+            ...(localEnv.ADMIN_PASSWORD
+              ? { ADMIN_PASSWORD: localEnv.ADMIN_PASSWORD }
+              : {}),
             ...(localEnv.DELETE_PASSWORD
               ? { DELETE_PASSWORD: localEnv.DELETE_PASSWORD }
               : {}),

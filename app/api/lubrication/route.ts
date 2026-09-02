@@ -1,5 +1,9 @@
 import { getD1 } from "../../../db";
-import { getChatGPTUser } from "../../chatgpt-auth";
+import {
+  authorizeAdminWriteRequest,
+  AdminWriteAuthorizationError,
+  getAdminWriteAuthorizationRuntimeEnv,
+} from "../../lib/adminWriteAuthorization";
 import {
   authorizeDeleteRequest,
   DeleteAuthorizationError,
@@ -52,6 +56,7 @@ type StoredRevisionRow = {
 
 type CorrectionPayload = {
   measurementId: string;
+  password: string;
   correctedBy: string;
   correctionReason: string;
   record: LubricationRecord;
@@ -228,16 +233,19 @@ function parseCorrectionPayload(value: unknown): CorrectionPayload {
 
   const payload = value as Record<string, unknown>;
   const measurementId = String(payload.measurementId ?? "").trim();
+  const password = String(payload.password ?? "").trim();
   const correctedBy = String(payload.correctedBy ?? "").trim();
   const correctionReason = String(payload.correctionReason ?? "").trim();
   const errors: string[] = [];
   if (!measurementId || measurementId.length > 180) errors.push("缺少要更正的紀錄 ID。");
+  if (!password) errors.push("請輸入網站管理密碼。");
   if (!correctedBy || correctedBy.length > 100) errors.push("更正人姓名為必填，且不得超過 100 字。");
   if (!correctionReason || correctionReason.length > 500) errors.push("更正原因為必填，且不得超過 500 字。");
   if (errors.length) throw new ImportValidationError(errors);
 
   return {
     measurementId,
+    password,
     correctedBy,
     correctionReason,
     record: normalizeRecord(payload.record, 0),
@@ -291,11 +299,6 @@ function revisionRowToRevision(row: StoredRevisionRow): LubricationRevision {
     createdBy: row.created_by,
     createdAt: row.created_at,
   };
-}
-
-function isLocalRequest(request: Request) {
-  const hostname = new URL(request.url).hostname;
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
 async function initializeDatabase(d1: D1Database) {
@@ -492,11 +495,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const requestBody = await request.json();
-    const user = await getChatGPTUser();
     const isManualEntry = isManualEntryPayload(requestBody);
-    if (!isManualEntry && !user && !isLocalRequest(request)) {
-      return Response.json({ error: "請先登入後再匯入 Excel。" }, { status: 401 });
-    }
 
     if (isManualEntry) {
       const runtimeEnv = await getTurnstileRuntimeEnv();
@@ -505,6 +504,12 @@ export async function POST(request: Request) {
         request,
         runtimeEnv,
         token: requestBody.turnstileToken,
+      });
+    } else {
+      await authorizeAdminWriteRequest({
+        request,
+        runtimeEnv: await getAdminWriteAuthorizationRuntimeEnv(),
+        password: String((requestBody as Record<string, unknown>).password ?? "").trim(),
       });
     }
 
@@ -537,7 +542,7 @@ export async function POST(request: Request) {
     }
 
     const batchId = crypto.randomUUID();
-    const actor = isManualEntry ? "anonymous-pov" : user?.email ?? "local-development";
+    const actor = isManualEntry ? "anonymous-pov" : "website-admin";
     await d1.batch([
       d1.prepare(`INSERT INTO import_batches
         (id, file_name, file_hash, submitted_count, inserted_count, duplicate_count, uploaded_by)
@@ -568,6 +573,9 @@ export async function POST(request: Request) {
       latestMeasuredAt: records.at(-1)?.measuredAt ?? null,
     });
   } catch (error) {
+    if (error instanceof AdminWriteAuthorizationError) {
+      return Response.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof TurnstileRequestError) {
       return Response.json({ error: error.message }, { status: error.status });
     }
@@ -583,12 +591,12 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const user = await getChatGPTUser();
-    if (!user && !isLocalRequest(request)) {
-      return Response.json({ error: "目前連線無法寫入更正紀錄。" }, { status: 401 });
-    }
-
     const payload = parseCorrectionPayload(await request.json());
+    await authorizeAdminWriteRequest({
+      request,
+      runtimeEnv: await getAdminWriteAuthorizationRuntimeEnv(),
+      password: payload.password,
+    });
     const d1 = await getD1();
     await ensureDatabase(d1);
     const monitored = await listMonitoredMeasurements(d1);
@@ -611,7 +619,7 @@ export async function PATCH(request: Request) {
     }
 
     const revisionNo = (target.revisions.at(-1)?.revisionNo ?? 0) + 1;
-    const actor = user?.email ?? "local-development";
+    const actor = payload.correctedBy;
     const createdAt = new Date().toISOString();
     await d1.prepare(`INSERT INTO measurement_revisions
       (id, measurement_id, revision_no, device_id, measured_at, oil_level, inspector, record_type,
@@ -642,6 +650,9 @@ export async function PATCH(request: Request) {
       correctedId: target.id,
     });
   } catch (error) {
+    if (error instanceof AdminWriteAuthorizationError) {
+      return Response.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof ImportValidationError) {
       return Response.json({ error: "更正資料驗證失敗。", details: error.details }, { status: 400 });
     }

@@ -14,6 +14,7 @@ type CorrectionForm = {
   refillAmount: string;
   correctedBy: string;
   correctionReason: string;
+  password: string;
 };
 
 const deviceOptions = [
@@ -45,6 +46,7 @@ function formatDateTime(value: string) {
 function displayActor(value: string) {
   if (value === "initial-excel") return "初始 Excel";
   if (value === "local-development") return "本機登記";
+  if (value === "website-admin") return "網站管理員";
   return value;
 }
 
@@ -69,6 +71,7 @@ export default function MonitorPage() {
   const [deletingRecord, setDeletingRecord] = useState<MonitoredLubricationRecord | null>(null);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteError, setDeleteError] = useState("");
+  const [awaitingFinalDeleteConfirmation, setAwaitingFinalDeleteConfirmation] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [feedback, setFeedback] = useState("");
 
@@ -132,6 +135,7 @@ export default function MonitorPage() {
       refillAmount: item.current.refillAmount === null ? "" : String(item.current.refillAmount),
       correctedBy: "",
       correctionReason: "",
+      password: "",
     });
     setFeedback("");
   };
@@ -147,6 +151,10 @@ export default function MonitorPage() {
     }
     if (!correction.correctedBy.trim() || !correction.correctionReason.trim()) {
       setFeedback("請填寫更正人姓名與更正原因。");
+      return;
+    }
+    if (!correction.password.trim()) {
+      setFeedback("請輸入網站管理密碼。");
       return;
     }
     if (correction.recordType === "補油" && (!Number.isFinite(refillAmount) || refillAmount === null || refillAmount <= 0)) {
@@ -171,6 +179,7 @@ export default function MonitorPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           measurementId: editing.id,
+          password: correction.password.trim(),
           correctedBy: correction.correctedBy.trim(),
           correctionReason: correction.correctionReason.trim(),
           record,
@@ -196,6 +205,7 @@ export default function MonitorPage() {
     setDeletingRecord(item);
     setDeletePassword("");
     setDeleteError("");
+    setAwaitingFinalDeleteConfirmation(false);
     setFeedback("");
   };
 
@@ -204,16 +214,23 @@ export default function MonitorPage() {
     setDeletingRecord(null);
     setDeletePassword("");
     setDeleteError("");
+    setAwaitingFinalDeleteConfirmation(false);
   };
 
-  const submitDelete = async (event: FormEvent<HTMLFormElement>) => {
+  const requestFinalDeleteConfirmation = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!deletingRecord) return;
     if (!deletePassword.trim()) {
       setDeleteError("請輸入刪除密碼。");
       return;
     }
+    setDeleteError("");
+    setAwaitingFinalDeleteConfirmation(true);
+  };
 
+  const submitDelete = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!deletingRecord || !awaitingFinalDeleteConfirmation) return;
     setDeleting(true);
     setDeleteError("");
     try {
@@ -232,6 +249,7 @@ export default function MonitorPage() {
       setExpandedId((current) => current === deletingRecord.id ? null : current);
       setDeletingRecord(null);
       setDeletePassword("");
+      setAwaitingFinalDeleteConfirmation(false);
       setFeedback(`${deletedSummary} 已永久刪除。`);
     } catch (submitError) {
       setDeleteError(submitError instanceof Error ? submitError.message : "紀錄刪除失敗。");
@@ -254,6 +272,7 @@ export default function MonitorPage() {
           <a href="/" className="nav-item">潤滑設備總覽</a>
           <a href="/wear" className="nav-item">正面軌道總覽</a>
           <a href="/side-wear" className="nav-item">側面軌道總覽</a>
+          <a href="/admin-area" className="nav-item admin-nav-item" data-requires-role="admin">ADMIN AREA</a>
         </nav>
         <div className="sync-state"><span className="pulse-dot"></span>完整歷程已連線</div>
       </header>
@@ -353,6 +372,7 @@ export default function MonitorPage() {
               <label className="manual-entry-field"><span>更正人姓名 <b>*</b></span><input value={correction.correctedBy} onChange={(event) => setCorrection({ ...correction, correctedBy: event.target.value })} disabled={saving} placeholder="例如：王小明" required /></label>
               <label className="manual-entry-field"><span>更正原因 <b>*</b></span><input value={correction.correctionReason} onChange={(event) => setCorrection({ ...correction, correctionReason: event.target.value })} disabled={saving} placeholder="例如：現場數字誤植" required /></label>
             </div>
+            <label className="manual-entry-field"><span>網站管理密碼 <b>*</b></span><input type="password" autoComplete="off" value={correction.password} onChange={(event) => setCorrection({ ...correction, password: event.target.value })} disabled={saving} placeholder="請輸入網站管理密碼" required /></label>
             {feedback ? <div className="manual-entry-error" role="alert">{feedback}</div> : null}
             <footer className="manual-entry-form-actions"><button type="button" className="manual-entry-cancel" onClick={() => { setEditing(null); setCorrection(null); setFeedback(""); }} disabled={saving}>取消</button><button type="submit" className="manual-entry-submit" disabled={saving}>{saving ? "正在保留新版本…" : "確認更正並保留原始值"}</button></footer>
           </form>
@@ -361,12 +381,12 @@ export default function MonitorPage() {
 
       {deletingRecord ? <div className="manual-entry-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDelete(); }}>
         <section className="manual-entry-modal monitor-delete-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description">
-          <header className="manual-entry-modal-header"><div><span className="panel-kicker">PERMANENT DELETE</span><h3 id="delete-title" className="monitor-delete-title"><span aria-hidden="true">×</span>刪除紀錄</h3><p id="delete-description">刪除後會立即從 D1 移除，無法復原。</p></div><button type="button" className="manual-entry-close" onClick={closeDelete} disabled={deleting} aria-label="關閉刪除視窗">×</button></header>
-          <form className="manual-entry-form" onSubmit={submitDelete}>
+          <header className="manual-entry-modal-header"><div><span className="panel-kicker">PERMANENT DELETE</span><h3 id="delete-title" className="monitor-delete-title"><span aria-hidden="true">×</span>{awaitingFinalDeleteConfirmation ? "真的要刪除嗎？" : "刪除紀錄"}</h3><p id="delete-description">{awaitingFinalDeleteConfirmation ? "這是最後一次確認，刪除後將無法復原。" : "刪除後會立即從 D1 移除，無法復原。"}</p></div><button type="button" className="manual-entry-close" onClick={closeDelete} disabled={deleting} aria-label="關閉刪除視窗">×</button></header>
+          <form className="manual-entry-form" onSubmit={awaitingFinalDeleteConfirmation ? submitDelete : requestFinalDeleteConfirmation}>
             <div className="monitor-delete-warning"><span>即將刪除</span><strong>{recordSummary(deletingRecord.current)}</strong><p>現場人員：{deletingRecord.current.inspector}｜來源：{deletingRecord.sourceType}</p></div>
-            <label className="manual-entry-field"><span>刪除密碼 <b>*</b></span><input type="password" autoComplete="off" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} disabled={deleting} placeholder="請輸入刪除密碼" autoFocus required /></label>
+            {awaitingFinalDeleteConfirmation ? <div className="monitor-delete-final-note" role="alert"><strong>請再次確認上方資料。</strong><span>按下「真的永久刪除」後，這筆紀錄會立即消失。</span></div> : <label className="manual-entry-field"><span>刪除密碼 <b>*</b></span><input type="password" autoComplete="off" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} disabled={deleting} placeholder="請輸入刪除密碼" autoFocus required /></label>}
             {deleteError ? <div className="manual-entry-error" role="alert">{deleteError}</div> : null}
-            <footer className="manual-entry-form-actions"><button type="button" className="manual-entry-cancel" onClick={closeDelete} disabled={deleting}>取消</button><button type="submit" className="monitor-delete-confirm" disabled={deleting}>{deleting ? "正在刪除…" : "確認永久刪除"}</button></footer>
+            <footer className="manual-entry-form-actions"><button type="button" className="manual-entry-cancel" onClick={awaitingFinalDeleteConfirmation ? () => { setAwaitingFinalDeleteConfirmation(false); setDeleteError(""); } : closeDelete} disabled={deleting}>{awaitingFinalDeleteConfirmation ? "返回檢查" : "取消"}</button><button type="submit" className="monitor-delete-confirm" disabled={deleting}>{deleting ? "正在刪除…" : awaitingFinalDeleteConfirmation ? "真的永久刪除" : "確認永久刪除"}</button></footer>
           </form>
         </section>
       </div> : null}
