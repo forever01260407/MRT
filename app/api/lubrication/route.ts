@@ -1,24 +1,10 @@
 import { getD1 } from "../../../db";
-import {
-  authorizeAdminWriteRequest,
-  AdminWriteAuthorizationError,
-  getAdminWriteAuthorizationRuntimeEnv,
-} from "../../lib/adminWriteAuthorization";
-import {
-  authorizeDeleteRequest,
-  DeleteAuthorizationError,
-  getDeleteAuthorizationRuntimeEnv,
-} from "../../lib/deleteAuthorization";
+import { getActiveRequestUser } from "../../lib/authorizedUser";
 import { initialLubricationRecords } from "../../lib/initialLubricationRecords";
 import { DEVICE_AXLE_PROFILE_TABLE_SQL, listDeviceAxleProfiles } from "../../lib/deviceAxleProfile";
 import type { LubricationRecord, LubricationRecordType } from "../../lib/lubricationExcel";
 import type { LubricationRevision, MonitoredLubricationRecord } from "../../lib/lubricationMonitor";
-import {
-  enforceManualEntryRateLimit,
-  getTurnstileRuntimeEnv,
-  TurnstileRequestError,
-  verifyTurnstileToken,
-} from "../../lib/turnstile";
+import { getRequestSourceIp } from "../../lib/requestContext";
 
 const INITIAL_BATCH_ID = "initial-excel-2026-08-19";
 const MAX_IMPORT_RECORDS = 500;
@@ -34,8 +20,13 @@ type StoredMeasurementRow = {
 
 type StoredMonitorMeasurementRow = StoredMeasurementRow & {
   created_by: string;
+  created_ip: string;
   created_at: string;
   file_name: string;
+  deleted_at: string | null;
+  deleted_by: string | null;
+  deleted_ip: string | null;
+  delete_reason: string | null;
 };
 
 type StoredRevisionRow = {
@@ -51,20 +42,34 @@ type StoredRevisionRow = {
   correction_reason: string;
   corrected_by: string;
   created_by: string;
+  source_ip: string;
+  created_at: string;
+};
+
+type StoredLifecycleEventRow = {
+  id: string;
+  measurement_id: string;
+  action: "deleted" | "restored";
+  reason: string;
+  actor: string;
+  source_ip: string;
   created_at: string;
 };
 
 type CorrectionPayload = {
   measurementId: string;
-  password: string;
-  correctedBy: string;
   correctionReason: string;
   record: LubricationRecord;
 };
 
 type DeletePayload = {
   measurementId: string;
-  password: string;
+  deleteReason: string;
+};
+
+type RestorePayload = {
+  measurementId: string;
+  restoreReason: string;
 };
 
 type ImportConflict = {
@@ -76,7 +81,6 @@ type ImportConflict = {
 
 type ManualEntryPayload = {
   submissionType: "manual";
-  turnstileToken: unknown;
   record: unknown;
 };
 
@@ -215,11 +219,14 @@ function isManualEntryPayload(value: unknown): value is ManualEntryPayload {
   );
 }
 
-function parseManualEntryPayload(value: ManualEntryPayload) {
-  const record = normalizeRecord(value.record, 0);
+function parseManualEntryPayload(value: ManualEntryPayload, inspector: string) {
+  const recordSource = value.record && typeof value.record === "object"
+    ? { ...(value.record as Record<string, unknown>), inspector }
+    : value.record;
+  const record = normalizeRecord(recordSource, 0);
   return {
     fileName: `現場登記-${record.deviceId}-${record.measuredAt.slice(0, 10)}`,
-    fileHash: `anonymous-pov-${crypto.randomUUID()}`,
+    fileHash: `signed-in-${crypto.randomUUID()}`,
     records: [record],
     submittedCount: 1,
     duplicateWithinFile: 0,
@@ -233,20 +240,14 @@ function parseCorrectionPayload(value: unknown): CorrectionPayload {
 
   const payload = value as Record<string, unknown>;
   const measurementId = String(payload.measurementId ?? "").trim();
-  const password = String(payload.password ?? "").trim();
-  const correctedBy = String(payload.correctedBy ?? "").trim();
   const correctionReason = String(payload.correctionReason ?? "").trim();
   const errors: string[] = [];
   if (!measurementId || measurementId.length > 180) errors.push("缺少要更正的紀錄 ID。");
-  if (!password) errors.push("請輸入網站管理密碼。");
-  if (!correctedBy || correctedBy.length > 100) errors.push("更正人姓名為必填，且不得超過 100 字。");
   if (!correctionReason || correctionReason.length > 500) errors.push("更正原因為必填，且不得超過 500 字。");
   if (errors.length) throw new ImportValidationError(errors);
 
   return {
     measurementId,
-    password,
-    correctedBy,
     correctionReason,
     record: normalizeRecord(payload.record, 0),
   };
@@ -259,12 +260,26 @@ function parseDeletePayload(value: unknown): DeletePayload {
 
   const payload = value as Record<string, unknown>;
   const measurementId = String(payload.measurementId ?? "").trim();
-  const password = String(payload.password ?? "").trim();
+  const deleteReason = String(payload.deleteReason ?? "").trim();
   const errors: string[] = [];
   if (!measurementId || measurementId.length > 180) errors.push("缺少要刪除的紀錄 ID。");
-  if (!password) errors.push("請輸入刪除密碼。");
+  if (!deleteReason || deleteReason.length > 500) errors.push("刪除原因為必填，且不得超過 500 字。");
   if (errors.length) throw new ImportValidationError(errors);
-  return { measurementId, password };
+  return { measurementId, deleteReason };
+}
+
+function parseRestorePayload(value: unknown): RestorePayload {
+  if (!value || typeof value !== "object") {
+    throw new ImportValidationError(["還原內容不是有效的 JSON 物件。"]);
+  }
+  const payload = value as Record<string, unknown>;
+  const measurementId = String(payload.measurementId ?? "").trim();
+  const restoreReason = String(payload.restoreReason ?? "").trim();
+  const errors: string[] = [];
+  if (!measurementId || measurementId.length > 180) errors.push("缺少要還原的紀錄 ID。");
+  if (!restoreReason || restoreReason.length > 500) errors.push("還原原因為必填，且不得超過 500 字。");
+  if (errors.length) throw new ImportValidationError(errors);
+  return { measurementId, restoreReason };
 }
 
 function rowToRecord(row: StoredMeasurementRow): LubricationRecord {
@@ -297,6 +312,18 @@ function revisionRowToRevision(row: StoredRevisionRow): LubricationRevision {
     correctionReason: row.correction_reason,
     correctedBy: row.corrected_by,
     createdBy: row.created_by,
+    sourceIp: row.source_ip,
+    createdAt: row.created_at,
+  };
+}
+
+function lifecycleRowToEvent(row: StoredLifecycleEventRow) {
+  return {
+    id: row.id,
+    action: row.action,
+    reason: row.reason,
+    actor: row.actor,
+    sourceIp: row.source_ip,
     createdAt: row.created_at,
   };
 }
@@ -323,6 +350,11 @@ async function initializeDatabase(d1: D1Database) {
       refill_amount REAL,
       import_batch_id TEXT NOT NULL REFERENCES import_batches(id),
       created_by TEXT NOT NULL,
+      created_ip TEXT NOT NULL DEFAULT '未知',
+      deleted_at TEXT,
+      deleted_by TEXT,
+      deleted_ip TEXT,
+      delete_reason TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
     d1.prepare(`CREATE TABLE IF NOT EXISTS measurement_revisions (
@@ -338,15 +370,28 @@ async function initializeDatabase(d1: D1Database) {
       correction_reason TEXT NOT NULL,
       corrected_by TEXT NOT NULL,
       created_by TEXT NOT NULL,
+      source_ip TEXT NOT NULL DEFAULT '未知',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS measurement_lifecycle_events (
+      id TEXT PRIMARY KEY NOT NULL,
+      measurement_id TEXT NOT NULL REFERENCES measurements(id),
+      action TEXT NOT NULL CHECK (action IN ('deleted', 'restored')),
+      reason TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      source_ip TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
     d1.prepare(DEVICE_AXLE_PROFILE_TABLE_SQL),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS measurements_device_measured_at_uidx ON measurements (device_id, measured_at)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurements_measured_at ON measurements (measured_at)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurements_import_batch_id ON measurements (import_batch_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurements_deleted_at ON measurements (deleted_at)"),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS measurement_revisions_measurement_revision_uidx ON measurement_revisions (measurement_id, revision_no)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurement_revisions_measurement_id ON measurement_revisions (measurement_id)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurement_revisions_created_at ON measurement_revisions (created_at)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurement_lifecycle_events_measurement_created_at ON measurement_lifecycle_events (measurement_id, created_at)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurement_lifecycle_events_created_at ON measurement_lifecycle_events (created_at)"),
   ]);
 
   const initialBatch = await d1.prepare("SELECT id FROM import_batches WHERE id = ? LIMIT 1")
@@ -394,26 +439,36 @@ async function ensureDatabase(d1: D1Database) {
 async function listMeasurements(d1: D1Database) {
   const monitored = await listMonitoredMeasurements(d1);
   return monitored
+    .filter((item) => !item.deletion)
     .map((item) => item.current)
     .sort((left, right) => left.measuredAt.localeCompare(right.measuredAt) || left.deviceId.localeCompare(right.deviceId, "en", { numeric: true }));
 }
 
 async function listRevisionRows(d1: D1Database) {
   const result = await d1.prepare(`SELECT id, measurement_id, revision_no, device_id, measured_at, oil_level,
-      inspector, record_type, refill_amount, correction_reason, corrected_by, created_by, created_at
+      inspector, record_type, refill_amount, correction_reason, corrected_by, created_by, source_ip, created_at
     FROM measurement_revisions
     ORDER BY measurement_id ASC, revision_no ASC`).all<StoredRevisionRow>();
   return result.results;
 }
 
+async function listLifecycleRows(d1: D1Database) {
+  const result = await d1.prepare(`SELECT id, measurement_id, action, reason, actor, source_ip, created_at
+    FROM measurement_lifecycle_events
+    ORDER BY measurement_id ASC, created_at ASC, rowid ASC`).all<StoredLifecycleEventRow>();
+  return result.results;
+}
+
 async function listMonitoredMeasurements(d1: D1Database): Promise<MonitoredLubricationRecord[]> {
-  const [measurementResult, revisionRows] = await Promise.all([
+  const [measurementResult, revisionRows, lifecycleRows] = await Promise.all([
     d1.prepare(`SELECT m.id, m.device_id, m.measured_at, m.oil_level, m.inspector, m.record_type,
-        m.refill_amount, m.created_by, m.created_at, b.file_name
+        m.refill_amount, m.created_by, m.created_ip, m.created_at, m.deleted_at, m.deleted_by,
+        m.deleted_ip, m.delete_reason, b.file_name
       FROM measurements m
       JOIN import_batches b ON b.id = m.import_batch_id
       ORDER BY m.measured_at DESC, m.device_id ASC`).all<StoredMonitorMeasurementRow>(),
     listRevisionRows(d1),
+    listLifecycleRows(d1),
   ]);
   const revisionsByMeasurement = new Map<string, LubricationRevision[]>();
   revisionRows.forEach((row) => {
@@ -421,11 +476,25 @@ async function listMonitoredMeasurements(d1: D1Database): Promise<MonitoredLubri
     revisions.push(revisionRowToRevision(row));
     revisionsByMeasurement.set(row.measurement_id, revisions);
   });
+  const lifecycleByMeasurement = new Map<string, ReturnType<typeof lifecycleRowToEvent>[]>();
+  lifecycleRows.forEach((row) => {
+    const events = lifecycleByMeasurement.get(row.measurement_id) ?? [];
+    events.push(lifecycleRowToEvent(row));
+    lifecycleByMeasurement.set(row.measurement_id, events);
+  });
 
   return measurementResult.results.map((row) => {
     const original = rowToRecord(row);
     const revisions = revisionsByMeasurement.get(row.id) ?? [];
     const currentRevision = revisions.at(-1);
+    const deletion = row.deleted_at && row.deleted_by && row.deleted_ip && row.delete_reason
+      ? {
+          deletedAt: row.deleted_at,
+          deletedBy: row.deleted_by,
+          deletedIp: row.deleted_ip,
+          deleteReason: row.delete_reason,
+        }
+      : null;
     return {
       id: row.id,
       original,
@@ -437,17 +506,32 @@ async function listMonitoredMeasurements(d1: D1Database): Promise<MonitoredLubri
         recordType: currentRevision.recordType,
         refillAmount: currentRevision.refillAmount,
       } : original,
-      status: revisions.length ? "已更正" : "有效",
+      status: deletion ? "已刪除" : revisions.length ? "已更正" : "有效",
       sourceType: row.file_name.startsWith("現場登記-") ? "現場登記" : "Excel 匯入",
       sourceName: row.file_name,
       createdBy: row.created_by,
+      createdIp: row.created_ip,
       createdAt: row.created_at,
       revisions,
+      deletion,
+      lifecycleEvents: lifecycleByMeasurement.get(row.id) ?? [],
     };
   });
 }
 
-async function findExistingMeasurements(d1: D1Database, _records: LubricationRecord[]) {
+function buildMonitorPayload(allRecords: MonitoredLubricationRecord[]) {
+  const records = allRecords.filter((item) => !item.deletion);
+  const deletedRecords = allRecords.filter((item) => item.deletion);
+  return {
+    records,
+    deletedRecords,
+    count: records.length,
+    deletedCount: deletedRecords.length,
+    revisionCount: allRecords.reduce((sum, item) => sum + item.revisions.length, 0),
+  };
+}
+
+async function findExistingMeasurements(d1: D1Database) {
   const existing = new Map<string, LubricationRecord>();
   const monitored = await listMonitoredMeasurements(d1);
   monitored.forEach((item) => {
@@ -467,12 +551,7 @@ export async function GET(request: Request) {
     const d1 = await getD1();
     await ensureDatabase(d1);
     if (new URL(request.url).searchParams.get("view") === "monitor") {
-      const records = await listMonitoredMeasurements(d1);
-      return Response.json({
-        records,
-        count: records.length,
-        revisionCount: records.reduce((sum, item) => sum + item.revisions.length, 0),
-      });
+      return Response.json(buildMonitorPayload(await listMonitoredMeasurements(d1)));
     }
     const [records, deviceAxleProfiles] = await Promise.all([
       listMeasurements(d1),
@@ -494,31 +573,22 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const actor = await getActiveRequestUser(request);
+    if (!actor) {
+      return Response.json({ error: "請先登入後再寫入紀錄。" }, { status: 401 });
+    }
     const requestBody = await request.json();
     const isManualEntry = isManualEntryPayload(requestBody);
-
-    if (isManualEntry) {
-      const runtimeEnv = await getTurnstileRuntimeEnv();
-      await enforceManualEntryRateLimit(request, runtimeEnv);
-      await verifyTurnstileToken({
-        request,
-        runtimeEnv,
-        token: requestBody.turnstileToken,
-      });
-    } else {
-      await authorizeAdminWriteRequest({
-        request,
-        runtimeEnv: await getAdminWriteAuthorizationRuntimeEnv(),
-        password: String((requestBody as Record<string, unknown>).password ?? "").trim(),
-      });
+    if (!isManualEntry && actor.role === "user") {
+      return Response.json({ error: "只有 supervisor 或 admin 可以匯入 Excel。" }, { status: 403 });
     }
 
     const payload = isManualEntry
-      ? parseManualEntryPayload(requestBody)
+      ? parseManualEntryPayload(requestBody, actor.name)
       : parseImportPayload(requestBody);
     const d1 = await getD1();
     await ensureDatabase(d1);
-    const existing = await findExistingMeasurements(d1, payload.records);
+    const existing = await findExistingMeasurements(d1);
     const newRecords: LubricationRecord[] = [];
     const conflicts: ImportConflict[] = [];
     let duplicateCount = payload.duplicateWithinFile;
@@ -542,15 +612,16 @@ export async function POST(request: Request) {
     }
 
     const batchId = crypto.randomUUID();
-    const actor = isManualEntry ? "anonymous-pov" : "website-admin";
+    const createdBy = actor.username;
+    const createdIp = getRequestSourceIp(request);
     await d1.batch([
       d1.prepare(`INSERT INTO import_batches
         (id, file_name, file_hash, submitted_count, inserted_count, duplicate_count, uploaded_by)
         VALUES (?, ?, ?, ?, ?, ?, ?)`)
-        .bind(batchId, payload.fileName, payload.fileHash, payload.submittedCount, newRecords.length, duplicateCount, actor),
+        .bind(batchId, payload.fileName, payload.fileHash, payload.submittedCount, newRecords.length, duplicateCount, createdBy),
       ...newRecords.map((record) => d1.prepare(`INSERT INTO measurements
-        (id, device_id, measured_at, oil_level, inspector, record_type, refill_amount, import_batch_id, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        (id, device_id, measured_at, oil_level, inspector, record_type, refill_amount, import_batch_id, created_by, created_ip)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .bind(
           crypto.randomUUID(),
           record.deviceId,
@@ -560,7 +631,8 @@ export async function POST(request: Request) {
           record.recordType,
           record.refillAmount,
           batchId,
-          actor,
+          createdBy,
+          createdIp,
         )),
     ]);
 
@@ -573,12 +645,6 @@ export async function POST(request: Request) {
       latestMeasuredAt: records.at(-1)?.measuredAt ?? null,
     });
   } catch (error) {
-    if (error instanceof AdminWriteAuthorizationError) {
-      return Response.json({ error: error.message }, { status: error.status });
-    }
-    if (error instanceof TurnstileRequestError) {
-      return Response.json({ error: error.message }, { status: error.status });
-    }
     if (error instanceof ImportValidationError) {
       return Response.json({ error: "提交資料驗證失敗。", details: error.details }, { status: 400 });
     }
@@ -591,16 +657,18 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
+    const actor = await getActiveRequestUser(request);
+    if (!actor) {
+      return Response.json({ error: "請先登入後再更正紀錄。" }, { status: 401 });
+    }
+    if (actor.role === "user") {
+      return Response.json({ error: "只有 supervisor 或 admin 可以更正紀錄。" }, { status: 403 });
+    }
     const payload = parseCorrectionPayload(await request.json());
-    await authorizeAdminWriteRequest({
-      request,
-      runtimeEnv: await getAdminWriteAuthorizationRuntimeEnv(),
-      password: payload.password,
-    });
     const d1 = await getD1();
     await ensureDatabase(d1);
     const monitored = await listMonitoredMeasurements(d1);
-    const target = monitored.find((item) => item.id === payload.measurementId);
+    const target = monitored.find((item) => item.id === payload.measurementId && !item.deletion);
     if (!target) {
       return Response.json({ error: "找不到要更正的原始紀錄。" }, { status: 404 });
     }
@@ -619,12 +687,12 @@ export async function PATCH(request: Request) {
     }
 
     const revisionNo = (target.revisions.at(-1)?.revisionNo ?? 0) + 1;
-    const actor = payload.correctedBy;
     const createdAt = new Date().toISOString();
+    const sourceIp = getRequestSourceIp(request);
     await d1.prepare(`INSERT INTO measurement_revisions
       (id, measurement_id, revision_no, device_id, measured_at, oil_level, inspector, record_type,
-       refill_amount, correction_reason, corrected_by, created_by, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+       refill_amount, correction_reason, corrected_by, created_by, source_ip, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         crypto.randomUUID(),
         target.id,
@@ -636,23 +704,18 @@ export async function PATCH(request: Request) {
         payload.record.recordType,
         payload.record.refillAmount,
         payload.correctionReason,
-        payload.correctedBy,
-        actor,
+        actor.name,
+        actor.username,
+        sourceIp,
         createdAt,
       )
       .run();
 
-    const records = await listMonitoredMeasurements(d1);
     return Response.json({
-      records,
-      count: records.length,
-      revisionCount: records.reduce((sum, item) => sum + item.revisions.length, 0),
+      ...buildMonitorPayload(await listMonitoredMeasurements(d1)),
       correctedId: target.id,
     });
   } catch (error) {
-    if (error instanceof AdminWriteAuthorizationError) {
-      return Response.json({ error: error.message }, { status: error.status });
-    }
     if (error instanceof ImportValidationError) {
       return Response.json({ error: "更正資料驗證失敗。", details: error.details }, { status: 400 });
     }
@@ -665,42 +728,92 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    const actor = await getActiveRequestUser(request);
+    if (!actor) {
+      return Response.json({ error: "請先登入後再刪除紀錄。" }, { status: 401 });
+    }
+    if (actor.role === "user") {
+      return Response.json({ error: "只有 supervisor 或 admin 可以刪除紀錄。" }, { status: 403 });
+    }
     const payload = parseDeletePayload(await request.json());
-    await authorizeDeleteRequest({
-      request,
-      runtimeEnv: await getDeleteAuthorizationRuntimeEnv(),
-      password: payload.password,
-    });
 
     const d1 = await getD1();
     await ensureDatabase(d1);
     const monitored = await listMonitoredMeasurements(d1);
-    const target = monitored.find((item) => item.id === payload.measurementId);
+    const target = monitored.find((item) => item.id === payload.measurementId && !item.deletion);
     if (!target) {
       return Response.json({ error: "找不到要刪除的紀錄。" }, { status: 404 });
     }
 
+    const deletedAt = new Date().toISOString();
+    const sourceIp = getRequestSourceIp(request);
     await d1.batch([
-      d1.prepare("DELETE FROM measurement_revisions WHERE measurement_id = ?").bind(target.id),
-      d1.prepare("DELETE FROM measurements WHERE id = ?").bind(target.id),
+      d1.prepare(`UPDATE measurements
+        SET deleted_at = ?, deleted_by = ?, deleted_ip = ?, delete_reason = ?
+        WHERE id = ? AND deleted_at IS NULL`)
+        .bind(deletedAt, actor.username, sourceIp, payload.deleteReason, target.id),
+      d1.prepare(`INSERT INTO measurement_lifecycle_events
+        (id, measurement_id, action, reason, actor, source_ip, created_at)
+        VALUES (?, ?, 'deleted', ?, ?, ?, ?)`)
+        .bind(`LIFE-${crypto.randomUUID().toUpperCase()}`, target.id, payload.deleteReason, actor.username, sourceIp, deletedAt),
     ]);
 
-    const records = await listMonitoredMeasurements(d1);
     return Response.json({
-      records,
-      count: records.length,
-      revisionCount: records.reduce((sum, item) => sum + item.revisions.length, 0),
+      ...buildMonitorPayload(await listMonitoredMeasurements(d1)),
       deletedId: target.id,
     });
   } catch (error) {
-    if (error instanceof DeleteAuthorizationError) {
-      return Response.json({ error: error.message }, { status: error.status });
-    }
     if (error instanceof ImportValidationError) {
       return Response.json({ error: "刪除資料驗證失敗。", details: error.details }, { status: 400 });
     }
     return Response.json(
-      { error: error instanceof Error ? error.message : "紀錄無法從永久資料庫刪除。" },
+      { error: error instanceof Error ? error.message : "紀錄無法標記為已刪除。" },
+      { status: 500 },
+    );
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const actor = await getActiveRequestUser(request);
+    if (!actor) {
+      return Response.json({ error: "請先登入後再還原紀錄。" }, { status: 401 });
+    }
+    if (actor.role === "user") {
+      return Response.json({ error: "只有 supervisor 或 admin 可以還原紀錄。" }, { status: 403 });
+    }
+    const payload = parseRestorePayload(await request.json());
+    const d1 = await getD1();
+    await ensureDatabase(d1);
+    const monitored = await listMonitoredMeasurements(d1);
+    const target = monitored.find((item) => item.id === payload.measurementId && item.deletion);
+    if (!target) {
+      return Response.json({ error: "找不到要還原的已刪除紀錄。" }, { status: 404 });
+    }
+
+    const restoredAt = new Date().toISOString();
+    const sourceIp = getRequestSourceIp(request);
+    await d1.batch([
+      d1.prepare(`UPDATE measurements
+        SET deleted_at = NULL, deleted_by = NULL, deleted_ip = NULL, delete_reason = NULL
+        WHERE id = ? AND deleted_at IS NOT NULL`)
+        .bind(target.id),
+      d1.prepare(`INSERT INTO measurement_lifecycle_events
+        (id, measurement_id, action, reason, actor, source_ip, created_at)
+        VALUES (?, ?, 'restored', ?, ?, ?, ?)`)
+        .bind(`LIFE-${crypto.randomUUID().toUpperCase()}`, target.id, payload.restoreReason, actor.username, sourceIp, restoredAt),
+    ]);
+
+    return Response.json({
+      ...buildMonitorPayload(await listMonitoredMeasurements(d1)),
+      restoredId: target.id,
+    });
+  } catch (error) {
+    if (error instanceof ImportValidationError) {
+      return Response.json({ error: "還原資料驗證失敗。", details: error.details }, { status: 400 });
+    }
+    return Response.json(
+      { error: error instanceof Error ? error.message : "紀錄無法還原。" },
       { status: 500 },
     );
   }

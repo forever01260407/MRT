@@ -1,0 +1,1 @@
+ALTER TABLE `device_axle_profiles` ADD `updated_by` text DEFAULT 'system' NOT NULL;

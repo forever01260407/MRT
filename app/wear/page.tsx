@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import Link from "next/link";
+import { AdminNavItem, SessionMenu } from "../components/AuthSessionProvider";
 import { predictWearTrend, projectWearAtTime } from "../lib/wearPrediction";
 import type { WearPredictionConfidence } from "../lib/wearPrediction";
 
@@ -147,7 +149,6 @@ const wearModeConfig = {
 const statusText: Record<RailStatus, string> = { normal: "正常", warning: "管理值", critical: "維修值" };
 const sideText: Record<RailSide, string> = { left: "左軌", right: "右軌" };
 const directionText: Record<Direction, string> = { up: "上行", down: "下行" };
-const statusPriority: Record<RailStatus, number> = { normal: 1, warning: 2, critical: 3 };
 const predictionConfidenceText: Record<WearPredictionConfidence, string> = {
   insufficient: "資料不足",
   low: "低",
@@ -273,10 +274,6 @@ function calculateRouteLayout(width: number, height: number): RouteLayout {
   });
 
   return { stationPoints, segmentGeometry };
-}
-
-function worstStatus(statuses: RailStatus[]): RailStatus {
-  return statuses.reduce((worst, status) => statusPriority[status] > statusPriority[worst] ? status : worst, "normal");
 }
 
 function WearHistoryChart({ reading, code, config, expanded = false }: {
@@ -688,12 +685,15 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
           <div><p className="eyebrow">NEW TAIPEI METRO · O&amp;M</p><h1>環狀線鋼軌狀態監測中心</h1></div>
         </div>
         <nav className="topnav" aria-label="主要功能">
-          <a href="/" className="nav-item">潤滑設備總覽</a>
+          <Link href="/" className="nav-item">潤滑設備總覽</Link>
           <a href="/wear" className={`nav-item ${mode === "tread" ? "active" : ""}`} aria-current={mode === "tread" ? "page" : undefined}>正面軌道總覽</a>
           <a href="/side-wear" className={`nav-item ${mode === "side" ? "active" : ""}`} aria-current={mode === "side" ? "page" : undefined}>側面軌道總覽</a>
-          <a href="/admin-area" className="nav-item admin-nav-item" data-requires-role="admin">ADMIN AREA</a>
+          <AdminNavItem />
         </nav>
-        <div className="sync-state"><span className="pulse-dot"></span>上／下行 · {config.measurement} · 門檻已設定</div>
+        <div className="topbar-status-group">
+          <div className="sync-state"><span className="pulse-dot"></span>上／下行 · {config.measurement} · 門檻已設定</div>
+          <SessionMenu />
+        </div>
       </header>
 
       <section className="page-content">

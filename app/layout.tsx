@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AuthSessionProvider } from "./components/AuthSessionProvider";
 
 export const metadata: Metadata = {
   title: "環狀線鋼軌狀態監測中心",
@@ -13,7 +14,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-Hant">
-      <body>{children}</body>
+      <body><AuthSessionProvider>{children}</AuthSessionProvider></body>
     </html>
   );
 }

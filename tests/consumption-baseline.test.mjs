@@ -16,8 +16,8 @@ async function loadBaselineModule() {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   });
   await writeFile(outputFile, compiled.outputText, "utf8");
-  const module = await import(`${pathToFileURL(outputFile).href}?t=${Date.now()}`);
-  return { module, cleanup: () => rm(outputDirectory, { recursive: true, force: true }) };
+  const baselineModule = await import(`${pathToFileURL(outputFile).href}?t=${Date.now()}`);
+  return { baselineModule, cleanup: () => rm(outputDirectory, { recursive: true, force: true }) };
 }
 
 function record(measuredAt, oilLevel, recordType = "量測") {
@@ -32,9 +32,9 @@ function record(measuredAt, oilLevel, recordType = "量測") {
 }
 
 test("continuous declines form weighted committed segments while the tail stays provisional", async () => {
-  const { module, cleanup } = await loadBaselineModule();
+  const { baselineModule, cleanup } = await loadBaselineModule();
   try {
-    const result = module.calculateConsumptionBaseline([
+    const result = baselineModule.calculateConsumptionBaseline([
       record("2026-07-01", 70),
       record("2026-07-02", 68),
       record("2026-07-04", 64.3),
@@ -57,16 +57,16 @@ test("continuous declines form weighted committed segments while the tail stays 
     );
     assert.equal(result.dailyConsumptionBaseline, 1.975);
     assert.equal(result.provisionalRate, 1.9);
-    assert.equal(module.forecastOilLevel(72.3, result.dailyConsumptionBaseline, 2), 68.35);
+    assert.equal(baselineModule.forecastOilLevel(72.3, result.dailyConsumptionBaseline, 2), 68.35);
   } finally {
     await cleanup();
   }
 });
 
 test("an explicit refill wins and an inferred rise must be strictly above the threshold", async () => {
-  const { module, cleanup } = await loadBaselineModule();
+  const { baselineModule, cleanup } = await loadBaselineModule();
   try {
-    const exactThreshold = module.calculateConsumptionBaseline([
+    const exactThreshold = baselineModule.calculateConsumptionBaseline([
       record("2026-07-01", 70),
       record("2026-07-02", 68),
       record("2026-07-03", 69),
@@ -75,7 +75,7 @@ test("an explicit refill wins and an inferred rise must be strictly above the th
     assert.equal(exactThreshold.segments.length, 0);
     assert.equal(exactThreshold.provisionalSegment?.consumption, 3);
 
-    const explicitRefill = module.calculateConsumptionBaseline([
+    const explicitRefill = baselineModule.calculateConsumptionBaseline([
       record("2026-07-01", 70),
       record("2026-07-02", 68),
       record("2026-07-03", 68.1, "補油"),

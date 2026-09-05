@@ -63,6 +63,11 @@ export default defineConfig(async ({ command, mode }) => {
         namespace_id: "1004",
         simple: { limit: 10, period: 60 as const },
       },
+      {
+        name: "AUTH_RATE_LIMITER",
+        namespace_id: "1005",
+        simple: { limit: 10, period: 60 as const },
+      },
     ],
     ...(command === "serve"
       ? {
@@ -74,6 +79,9 @@ export default defineConfig(async ({ command, mode }) => {
               : {}),
             ...(localEnv.DELETE_PASSWORD
               ? { DELETE_PASSWORD: localEnv.DELETE_PASSWORD }
+              : {}),
+            ...(localEnv.AUTH_SECRET
+              ? { AUTH_SECRET: localEnv.AUTH_SECRET }
               : {}),
           },
         }

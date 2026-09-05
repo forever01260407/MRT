@@ -1,11 +1,9 @@
 import { getD1 } from "../../../db";
-import {
-  authorizeDeviceAxleProfileWrite,
-  DeviceAxleProfileAuthorizationError,
-  getDeviceAxleProfileAuthorizationRuntimeEnv,
-} from "../../lib/deviceAxleProfileAuthorization";
+import { getActiveRequestUser } from "../../lib/authorizedUser";
+import { getRequestSourceIp } from "../../lib/requestContext";
 import {
   ensureDeviceAxleProfileTable,
+  listDeviceAxleProfileEvents,
   listDeviceAxleProfiles,
   upsertDeviceAxleProfile,
 } from "../../lib/deviceAxleProfile";
@@ -48,12 +46,9 @@ function parsePayload(value: unknown) {
   const raw = value as Record<string, unknown>;
   const deviceId = normalizeDeviceId(raw.deviceId);
   const effectiveDate = normalizeEffectiveDate(raw.effectiveDate);
-  const password = String(raw.password ?? "").trim();
   if (!deviceId) throw new DeviceAxleProfileValidationError("潤滑站點必須是 MOK-01～MOK-10 或 LB-01～LB-10。");
   if (!effectiveDate) throw new DeviceAxleProfileValidationError("請輸入有效的更新日期。");
-  if (!password) throw new DeviceAxleProfileValidationError("請輸入管理密碼。");
   return {
-    password,
     profile: {
       deviceId,
       effectiveDate,
@@ -67,8 +62,16 @@ export async function GET() {
   try {
     const d1 = await getD1();
     await ensureDeviceAxleProfileTable(d1);
-    const deviceAxleProfiles = await listDeviceAxleProfiles(d1);
-    return Response.json({ deviceAxleProfiles, count: deviceAxleProfiles.length });
+    const [deviceAxleProfiles, changeLogs] = await Promise.all([
+      listDeviceAxleProfiles(d1),
+      listDeviceAxleProfileEvents(d1),
+    ]);
+    return Response.json({
+      deviceAxleProfiles,
+      changeLogs,
+      count: deviceAxleProfiles.length,
+      changeLogCount: changeLogs.length,
+    });
   } catch (error) {
     return Response.json(
       { error: error instanceof Error ? error.message : "無法讀取階軸設定。" },
@@ -79,19 +82,25 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
+    const actor = await getActiveRequestUser(request);
+    if (!actor) {
+      return Response.json({ error: "請先登入後再變更階軸設定。" }, { status: 401 });
+    }
+    if (actor.role === "user") {
+      return Response.json({ error: "只有 supervisor 或 admin 可以變更階軸設定。" }, { status: 403 });
+    }
     const payload = parsePayload(await request.json());
-    await authorizeDeviceAxleProfileWrite({
-      request,
-      runtimeEnv: await getDeviceAxleProfileAuthorizationRuntimeEnv(),
-      password: payload.password,
-    });
 
     const d1 = await getD1();
     await ensureDeviceAxleProfileTable(d1);
     const existing = await d1.prepare("SELECT device_id FROM device_axle_profiles WHERE device_id = ? LIMIT 1")
       .bind(payload.profile.deviceId)
       .first<{ device_id: string }>();
-    const profile = await upsertDeviceAxleProfile(d1, payload.profile);
+    const profile = await upsertDeviceAxleProfile(d1, {
+      ...payload.profile,
+      updatedBy: actor.username,
+      sourceIp: getRequestSourceIp(request),
+    });
     const deviceAxleProfiles = await listDeviceAxleProfiles(d1);
     return Response.json({
       profile,
@@ -100,9 +109,6 @@ export async function PUT(request: Request) {
       message: existing ? `${profile.deviceId} 的階軸設定已覆蓋。` : `${profile.deviceId} 的階軸設定已建立。`,
     }, { status: existing ? 200 : 201 });
   } catch (error) {
-    if (error instanceof DeviceAxleProfileAuthorizationError) {
-      return Response.json({ error: error.message }, { status: error.status });
-    }
     if (error instanceof DeviceAxleProfileValidationError) {
       return Response.json({ error: error.message }, { status: 400 });
     }

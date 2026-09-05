@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
-import { TurnstileWidget } from "./components/TurnstileWidget";
+import Link from "next/link";
+import { AdminNavItem, SessionMenu, useAuthSession } from "./components/AuthSessionProvider";
 import { calculateConsumptionBaseline, forecastOilLevel } from "./lib/consumptionBaseline";
 import type { DeviceAxleProfile } from "./lib/deviceAxleProfile";
 import { LubricationImportError, readLubricationWorkbook } from "./lib/lubricationExcel";
@@ -99,7 +100,6 @@ type AxleSettingsForm = {
   effectiveDate: string;
   stageCount: string;
   axleCount: string;
-  password: string;
 };
 
 type AxleSettingsFeedback = {
@@ -622,6 +622,8 @@ function HistoryChart({ devices, expanded = false }: { devices: Device[]; expand
 }
 
 export default function Home() {
+  const { user: signedInUser, loading: authLoading } = useAuthSession();
+  const canUseSupervisorTools = !authLoading && (signedInUser?.role === "supervisor" || signedInUser?.role === "admin");
   const topologyRef = useRef<HTMLDivElement>(null);
   const expandedTopologyRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
@@ -656,26 +658,22 @@ export default function Home() {
   }));
   const [manualEntryFeedback, setManualEntryFeedback] = useState<ManualEntryFeedback>({
     status: "idle",
-    message: "POV 開放免登入單筆登記，送出前會自動完成安全驗證。",
+    message: "送出後會以目前登入者身分寫入 D1。",
   });
   const [axleSettings, setAxleSettings] = useState<AxleSettingsForm>(() => ({
     deviceId: "",
     effectiveDate: todayInTaipei(),
     stageCount: "",
     axleCount: "",
-    password: "",
   }));
   const [axleSettingsFeedback, setAxleSettingsFeedback] = useState<AxleSettingsFeedback>({
     status: "idle",
     message: "選擇潤滑站點後，儲存會建立或覆蓋該站目前設定。",
   });
-  const [manualTurnstileToken, setManualTurnstileToken] = useState<string | null>(null);
-  const [manualTurnstileResetKey, setManualTurnstileResetKey] = useState(0);
   const [forecastDate, setForecastDate] = useState(todayInTaipei);
   const [activeSegments, setActiveSegments] = useState<Segment[]>(segments);
   const [deviceAxleProfiles, setDeviceAxleProfiles] = useState<DeviceAxleProfile[]>([]);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
-  const [excelImportPassword, setExcelImportPassword] = useState("");
   const [excelImport, setExcelImport] = useState<ExcelImportState>({
     status: "loading",
     message: "正在從 D1 永久資料庫讀取潤滑紀錄…",
@@ -983,7 +981,6 @@ export default function Home() {
       effectiveDate: todayInTaipei(),
       stageCount: profile ? String(profile.stageCount) : "",
       axleCount: profile ? String(profile.axleCount) : "",
-      password: "",
     };
   };
 
@@ -1021,11 +1018,6 @@ export default function Home() {
       setAxleSettingsFeedback({ status: "error", message: "軸數必須是 1～999 的整數。" });
       return;
     }
-    if (!axleSettings.password.trim()) {
-      setAxleSettingsFeedback({ status: "error", message: "請輸入管理密碼。" });
-      return;
-    }
-
     setAxleSettingsFeedback({ status: "saving", message: "正在寫入 D1 並更新站點顯示…" });
     try {
       const response = await fetch("/api/device-axle-profiles", {
@@ -1036,7 +1028,6 @@ export default function Home() {
           effectiveDate: axleSettings.effectiveDate,
           stageCount,
           axleCount,
-          password: axleSettings.password,
         }),
       });
       const payload = await response.json() as {
@@ -1056,10 +1047,9 @@ export default function Home() {
         setSelectedSegmentId(targetSegment.id);
         setSelectedDeviceId(payload.profile.deviceId);
       }
-      setAxleSettings((current) => ({ ...current, password: "" }));
       setAxleSettingsFeedback({
         status: "success",
-        message: `${formatLubricationDeviceId(payload.profile.deviceId)} 已${payload.overwritten ? "覆蓋" : "建立"}為 ${payload.profile.stageCount}階${payload.profile.axleCount}軸。`,
+        message: `${formatLubricationDeviceId(payload.profile.deviceId)} 已${payload.overwritten ? "覆蓋" : "建立"}為 ${payload.profile.stageCount}階${payload.profile.axleCount}軸；更動人 @${payload.profile.updatedBy}。`,
       });
     } catch (error) {
       setAxleSettingsFeedback({ status: "error", message: error instanceof Error ? error.message : "階軸設定無法寫入永久資料庫。" });
@@ -1071,13 +1061,11 @@ export default function Home() {
       deviceId: selectedDevice?.id ?? manualDeviceOptions[0] ?? "",
       oilLevel: selectedDevice && hasDeviceData(selectedDevice) ? String(selectedDevice.value) : "",
       measuredDate: todayInTaipei(),
-      inspector: "",
+      inspector: signedInUser?.name || signedInUser?.username || "",
       recordType: "量測",
       refillAmount: "",
     });
-    setManualTurnstileToken(null);
-    setManualTurnstileResetKey((current) => current + 1);
-    setManualEntryFeedback({ status: "idle", message: "免登入單筆登記；安全驗證完成後會立即同步至 D1。" });
+    setManualEntryFeedback({ status: "idle", message: `現場人員會記錄為 ${signedInUser?.name || signedInUser?.username || "目前登入者"}。` });
     setIsManualEntryOpen(true);
   };
 
@@ -1099,16 +1087,11 @@ export default function Home() {
       setManualEntryFeedback({ status: "error", message: "補油紀錄必須填寫大於 0 的本次補油量。" });
       return;
     }
-    if (!manualTurnstileToken) {
-      setManualEntryFeedback({ status: "error", message: "安全驗證尚未完成，請稍候後再送出。" });
-      return;
-    }
-
     const record: LubricationRecord = {
       deviceId: manualEntry.deviceId,
       measuredAt: `${manualEntry.measuredDate}T00:00:00`,
       oilLevel: Number(oilLevel.toFixed(2)),
-      inspector: manualEntry.inspector.trim() || "未指定",
+      inspector: signedInUser?.name || signedInUser?.username || manualEntry.inspector.trim() || "未指定",
       recordType: manualEntry.recordType,
       refillAmount: manualEntry.recordType === "補油" ? Number(refillAmount!.toFixed(2)) : null,
     };
@@ -1120,7 +1103,6 @@ export default function Home() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           submissionType: "manual",
-          turnstileToken: manualTurnstileToken,
           record,
         }),
       });
@@ -1165,8 +1147,6 @@ export default function Home() {
         ? error.details
         : [error instanceof Error ? error.message : "現場紀錄無法寫入永久資料庫。"];
       setManualEntryFeedback({ status: "error", message: details[0] ?? "現場紀錄無法寫入永久資料庫。" });
-      setManualTurnstileToken(null);
-      setManualTurnstileResetKey((current) => current + 1);
     }
   };
 
@@ -1210,21 +1190,12 @@ export default function Home() {
 
   const confirmExcelImport = async () => {
     if (!pendingImport) return;
-    if (!excelImportPassword.trim()) {
-      setExcelImport((current) => ({
-        ...current,
-        status: "error",
-        message: "請輸入網站管理密碼後再寫入 D1。",
-        errors: ["網站管理密碼為必填。"],
-      }));
-      return;
-    }
     setExcelImport((current) => ({ ...current, status: "saving", message: `正在比對並寫入 ${pendingImport.fileName}…`, errors: undefined }));
     try {
       const response = await fetch("/api/lubrication", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...pendingImport, password: excelImportPassword.trim() }),
+        body: JSON.stringify(pendingImport),
       });
       const payload = await response.json() as {
         records?: LubricationRecord[];
@@ -1242,7 +1213,6 @@ export default function Home() {
       const insertedCount = payload.insertedCount ?? 0;
       const duplicateCount = payload.duplicateCount ?? 0;
       setPendingImport(null);
-      setExcelImportPassword("");
       setExcelImport({
         status: "success",
         message: `D1 寫入完成：新增 ${insertedCount} 筆、略過 ${duplicateCount} 筆相同資料；資料庫目前共有 ${payload.records.length} 筆。`,
@@ -1268,7 +1238,6 @@ export default function Home() {
 
   const cancelPendingImport = () => {
     setPendingImport(null);
-    setExcelImportPassword("");
     setExcelImport((current) => ({
       status: "success",
       message: "已取消這次匯入；D1 內既有資料沒有變動。",
@@ -1507,12 +1476,15 @@ export default function Home() {
           </div>
         </div>
         <nav className="topnav" aria-label="主要功能">
-          <a href="/" className="nav-item active" aria-current="page">潤滑設備總覽</a>
+          <Link href="/" className="nav-item active" aria-current="page">潤滑設備總覽</Link>
           <a href="/wear" className="nav-item">正面軌道總覽</a>
           <a href="/side-wear" className="nav-item">側面軌道總覽</a>
-          <a href="/admin-area" className="nav-item admin-nav-item" data-requires-role="admin">ADMIN AREA</a>
+          <AdminNavItem />
         </nav>
-        <div className="sync-state"><span className="pulse-dot"></span>{excelImport.status === "success" ? "D1 永久資料庫已同步" : excelImport.status === "loading" || excelImport.status === "saving" ? "資料庫同步中" : "資料庫等待確認"}</div>
+        <div className="topbar-status-group">
+          <div className="sync-state"><span className="pulse-dot"></span>{excelImport.status === "success" ? "D1 永久資料庫已同步" : excelImport.status === "loading" || excelImport.status === "saving" ? "資料庫同步中" : "資料庫等待確認"}</div>
+          <SessionMenu />
+        </div>
       </header>
 
       <section className="page-content">
@@ -1524,24 +1496,26 @@ export default function Home() {
           </div>
           <div className="page-heading-side">
             <div className="updated-at">資料時間 <strong>{excelImport.latestMeasuredAt ? formatMeasurementTime(excelImport.latestMeasuredAt) : "讀取中"}</strong></div>
-            <div className="page-heading-tools">
-              <button
-                type="button"
-                className="mini-axle-settings-button"
-                ref={axleSettingsTriggerRef}
-                onClick={openAxleSettings}
-                aria-haspopup="dialog"
-              >
-                <span className="mini-axle-settings-icon" aria-hidden="true">軸</span>
-                <span><strong>階軸設定</strong><small>設定潤滑站點階數與軸數</small></span>
-                <b aria-hidden="true">＋</b>
-              </button>
-              <a className="mini-monitor-link" href="/monitor">
-                <span className="mini-monitor-dot" aria-hidden="true"></span>
-                <span><strong>Monitor Area</strong><small>查看全部紀錄與更正歷程</small></span>
-                <b aria-hidden="true">→</b>
-              </a>
-            </div>
+            {canUseSupervisorTools ? (
+              <div className="page-heading-tools">
+                <button
+                  type="button"
+                  className="mini-axle-settings-button"
+                  ref={axleSettingsTriggerRef}
+                  onClick={openAxleSettings}
+                  aria-haspopup="dialog"
+                >
+                  <span className="mini-axle-settings-icon" aria-hidden="true">軸</span>
+                  <span><strong>階軸設定</strong><small>設定潤滑站點階數與軸數</small></span>
+                  <b aria-hidden="true">＋</b>
+                </button>
+                <a className="mini-monitor-link" href="/monitor">
+                  <span className="mini-monitor-dot" aria-hidden="true"></span>
+                  <span><strong>Monitor Area</strong><small>查看全部紀錄與更正歷程</small></span>
+                  <b aria-hidden="true">→</b>
+                </a>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -1559,7 +1533,6 @@ export default function Home() {
                 {excelImport.status === "loading" ? "讀取中…" : pendingImport ? "重新選擇 Excel" : "選擇 Excel 匯入"}
               </button>
               <input ref={excelInputRef} className="visually-hidden-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleExcelImport} />
-              {pendingImport ? <label className="excel-import-password"><span>網站管理密碼</span><input type="password" autoComplete="off" value={excelImportPassword} onChange={(event) => setExcelImportPassword(event.target.value)} disabled={excelImport.status === "saving"} placeholder="輸入後確認寫入" aria-label="Excel 匯入網站管理密碼" /></label> : null}
               {pendingImport ? <button type="button" className="excel-confirm-button" onClick={confirmExcelImport} disabled={excelImport.status === "saving"}>{excelImport.status === "saving" ? "寫入中…" : "確認寫入 D1"}</button> : null}
               {pendingImport ? <button type="button" className="excel-reset-button" onClick={cancelPendingImport} disabled={excelImport.status === "saving"}>取消</button> : null}
             </div>
@@ -1575,7 +1548,7 @@ export default function Home() {
             <div className="manual-entry-copy">
               <span className="panel-kicker">ON-SITE MEASUREMENT</span>
               <h3 id="manual-entry-panel-title">現場登記</h3>
-              <p>POV 期間免登入即可登記單筆量測；Cloudflare 安全驗證通過後即時寫入 D1。</p>
+              <p>登入後即可登記單筆量測；系統會自動記錄目前使用者。</p>
             </div>
             <button
               type="button"
@@ -1934,7 +1907,7 @@ export default function Home() {
                 <div className={`axle-settings-current ${editingAxleProfile ? "configured" : "empty"}`} aria-live="polite">
                   <span>目前設定</span>
                   <strong>{editingAxleProfile ? `${editingAxleProfile.stageCount}階${editingAxleProfile.axleCount}軸` : "尚未設定"}</strong>
-                  <small>{editingAxleProfile ? `生效日期 ${editingAxleProfile.effectiveDate}` : "首次儲存會建立此站點的階軸資料。"}</small>
+                  <small>{editingAxleProfile ? `生效日期 ${editingAxleProfile.effectiveDate}｜更動人 @${editingAxleProfile.updatedBy}` : "首次儲存會建立此站點的階軸資料。"}</small>
                 </div>
 
                 <div className="manual-entry-field-row axle-settings-count-row">
@@ -1971,7 +1944,7 @@ export default function Home() {
                 </div>
 
                 <div className="manual-entry-field-row">
-                  <label className="manual-entry-field">
+                  <label className="manual-entry-field full-width">
                     <span>更新日期 <b>*</b></span>
                     <input
                       type="date"
@@ -1979,18 +1952,6 @@ export default function Home() {
                       value={axleSettings.effectiveDate}
                       onChange={(event) => setAxleSettings((current) => ({ ...current, effectiveDate: event.target.value }))}
                       disabled={axleSettingsFeedback.status === "saving"}
-                      required
-                    />
-                  </label>
-                  <label className="manual-entry-field">
-                    <span>管理密碼 <b>*</b></span>
-                    <input
-                      type="password"
-                      autoComplete="current-password"
-                      value={axleSettings.password}
-                      onChange={(event) => setAxleSettings((current) => ({ ...current, password: event.target.value }))}
-                      disabled={axleSettingsFeedback.status === "saving"}
-                      placeholder="輸入目前的管理密碼"
                       required
                     />
                   </label>
@@ -2030,7 +1991,7 @@ export default function Home() {
                 <div>
                   <span className="panel-kicker">ON-SITE MEASUREMENT</span>
                   <h3 id="manual-entry-title"><span aria-hidden="true">＋</span>手動登記現場量測值</h3>
-                  <p id="manual-entry-description">本 POV 不需登入；通過安全驗證後立即寫入 D1。人員留白時記錄為「未指定」。</p>
+                  <p id="manual-entry-description">資料會立即寫入 D1，現場人員由目前登入帳號自動帶入。</p>
                 </div>
                 <button
                   type="button"
@@ -2085,15 +2046,15 @@ export default function Home() {
                 </div>
 
                 <label className="manual-entry-field full-width">
-                  <span>量測巡檢人員</span>
+                  <span>量測巡檢人員（登入身分）</span>
                   <input
                     type="text"
                     maxLength={100}
                     value={manualEntry.inspector}
-                    onChange={(event) => setManualEntry((current) => ({ ...current, inspector: event.target.value }))}
-                    disabled={manualEntryFeedback.status === "saving"}
-                    placeholder="留空將自動記錄為未指定"
+                    readOnly
+                    aria-readonly="true"
                   />
+                  <small>此欄由系統自動填入，送出時會由後端再次確認。</small>
                 </label>
 
                 <div className="manual-entry-field-row">
@@ -2130,19 +2091,14 @@ export default function Home() {
                   ) : <div className="manual-entry-type-note">量測紀錄只保存現場顯示油量。</div>}
                 </div>
 
-                <TurnstileWidget
-                  key={manualTurnstileResetKey}
-                  onTokenChange={setManualTurnstileToken}
-                />
-
                 {manualEntryFeedback.status === "error" ? (
                   <div className="manual-entry-error" role="alert">{manualEntryFeedback.message}</div>
                 ) : null}
 
                 <footer className="manual-entry-form-actions">
                   <button type="button" className="manual-entry-cancel" onClick={closeManualEntry} disabled={manualEntryFeedback.status === "saving"}>取消</button>
-                  <button type="submit" className="manual-entry-submit" disabled={manualEntryFeedback.status === "saving" || !manualTurnstileToken}>
-                    {manualEntryFeedback.status === "saving" ? "同步中…" : manualTurnstileToken ? "確認登錄並即時同步" : "安全驗證中…"}
+                  <button type="submit" className="manual-entry-submit" disabled={manualEntryFeedback.status === "saving"}>
+                    {manualEntryFeedback.status === "saving" ? "同步中…" : "確認登錄並即時同步"}
                   </button>
                 </footer>
               </form>
