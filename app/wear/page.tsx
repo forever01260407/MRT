@@ -691,7 +691,6 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
           <AdminNavItem />
         </nav>
         <div className="topbar-status-group">
-          <div className="sync-state"><span className="pulse-dot"></span>上／下行 · {config.measurement} · 門檻已設定</div>
           <SessionMenu />
         </div>
       </header>

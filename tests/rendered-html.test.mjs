@@ -377,8 +377,10 @@ test("server-renders Cloudflare-synchronized current tread and side-wear estimat
   const response = await render("/wear");
   assert.equal(response.status, 200);
   const html = await response.text();
+  const page = await readFile(new URL("../app/wear/page.tsx", import.meta.url), "utf8");
 
   assert.match(html, /當下磨耗狀況推估/);
+  assert.doesNotMatch(page, /上／下行 · \{config\.measurement\} · 門檻已設定/);
   assert.match(html, /穩健磨耗率/);
   assert.match(html, /當下預估/);
   assert.match(html, /距最近量測/);
