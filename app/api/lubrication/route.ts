@@ -506,7 +506,7 @@ async function listMonitoredMeasurements(d1: D1Database): Promise<MonitoredLubri
         recordType: currentRevision.recordType,
         refillAmount: currentRevision.refillAmount,
       } : original,
-      status: deletion ? "已刪除" : revisions.length ? "已更正" : "有效",
+      status: deletion ? "已失效" : revisions.length ? "已更正" : "有效",
       sourceType: row.file_name.startsWith("現場登記-") ? "現場登記" : "Excel 匯入",
       sourceName: row.file_name,
       createdBy: row.created_by,
@@ -779,8 +779,8 @@ export async function PUT(request: Request) {
     if (!actor) {
       return Response.json({ error: "請先登入後再還原紀錄。" }, { status: 401 });
     }
-    if (actor.role === "user") {
-      return Response.json({ error: "只有 supervisor 或 admin 可以還原紀錄。" }, { status: 403 });
+    if (actor.role !== "admin") {
+      return Response.json({ error: "只有 admin 可以從垃圾桶還原紀錄。" }, { status: 403 });
     }
     const payload = parseRestorePayload(await request.json());
     const d1 = await getD1();
@@ -788,7 +788,7 @@ export async function PUT(request: Request) {
     const monitored = await listMonitoredMeasurements(d1);
     const target = monitored.find((item) => item.id === payload.measurementId && item.deletion);
     if (!target) {
-      return Response.json({ error: "找不到要還原的已刪除紀錄。" }, { status: 404 });
+      return Response.json({ error: "找不到要還原的垃圾桶紀錄。" }, { status: 404 });
     }
 
     const restoredAt = new Date().toISOString();

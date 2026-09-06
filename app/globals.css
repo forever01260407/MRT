@@ -346,7 +346,7 @@ button:focus-visible {
 .monitor-view-tabs button:hover { color: var(--violet); }
 .monitor-view-tabs button.active { color: var(--violet); border-bottom-color: var(--violet); }
 .monitor-view-tabs button span { min-width: 20px; padding: 2px 6px; border-radius: 999px; color: #665bd1; background: var(--violet-soft); font-size: 8px; }
-.monitor-view-tabs button.deleted-tab { margin-left: auto; }
+.monitor-view-tabs button.deleted-tab { color: #9f2942; }
 .monitor-view-tabs button.deleted-tab.active { color: #b32643; border-bottom-color: var(--danger); }
 .monitor-view-tabs button.deleted-tab span { color: #b32643; background: var(--danger-soft); }
 .monitor-filters { padding: 12px 20px; display: grid; grid-template-columns: minmax(240px, 1.5fr) repeat(4, minmax(120px, .65fr)); gap: 9px; border-bottom: 1px solid var(--line); background: #fafbfe; }
@@ -386,6 +386,7 @@ button:focus-visible {
 .monitor-row-actions button.delete:hover { border-color: var(--danger); background: #ffdce4; }
 .monitor-row-actions button.restore { color: #087453; border-color: #a7dfcc; background: var(--success-soft); }
 .monitor-row-actions button.restore:hover { border-color: var(--success); background: #d9f5eb; }
+.monitor-admin-only { color: var(--muted); font-size: 9px; font-weight: 800; white-space: nowrap; }
 .monitor-table tbody > tr.deleted-record { background: #fffafb; }
 .monitor-reason-cell { max-width: 260px; white-space: normal !important; line-height: 1.5; }
 .monitor-deleted-table { min-width: 1420px; }
@@ -461,7 +462,6 @@ button:focus-visible {
   .monitor-correction-modal, .monitor-delete-modal, .monitor-restore-modal { width: min(660px, calc(100vw - 20px)); }
   .monitor-view-tabs { overflow-x: auto; }
   .monitor-view-tabs button { flex: 0 0 auto; }
-  .monitor-view-tabs button.deleted-tab { margin-left: 0; }
 }
 
 /* Authentication */

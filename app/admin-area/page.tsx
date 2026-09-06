@@ -75,7 +75,7 @@ const permissions = [
   { label: "更正量測紀錄", group: "資料", user: false, userpro: false, supervisor: true, admin: true },
   { label: "設定設備階軸", group: "設備", user: false, userpro: false, supervisor: true, admin: true },
   { label: "軟刪除紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true },
-  { label: "還原已刪除紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true },
+  { label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: false, admin: true },
   { label: "管理人員與角色", group: "管理", user: false, userpro: false, supervisor: false, admin: true },
   { label: "查看完整操作紀錄", group: "管理", user: false, userpro: false, supervisor: false, admin: true },
 ] as const;

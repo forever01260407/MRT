@@ -256,11 +256,11 @@ test("server-renders the complete append-only record monitor", async () => {
   assert.match(html, /異動會保留原始資料/);
   assert.match(html, /全部量測與補油紀錄/);
   assert.match(html, /設備設定紀錄/);
-  assert.match(html, /已刪除紀錄/);
+  assert.match(html, /垃圾桶（已刪除）/);
   assert.match(page, /更動軸數/);
   assert.match(html, /更正會新增版本/);
   assert.match(page, /刪除者、伺服器時間、IP 與原因/);
-  assert.match(page, /還原後會重新出現在量測紀錄、總覽、圖表與統計中/);
+  assert.match(page, /還原後會重新納入量測紀錄、總覽、圖表與統計/);
   assert.match(html, /切換為 LB1 到 MOK10 的設備順序/);
 });
 
@@ -411,9 +411,10 @@ test("returns the current Cloudflare time as uncached UTC with Taipei metadata",
   assert.ok(Number.isFinite(Date.parse(payload.now)));
 });
 
-test("soft-deletes and restores records for supervisors and admins with an auditable history", async () => {
+test("lets supervisors and admins move records to Trash while only admins can restore them", async () => {
   const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
   const page = await readFile(new URL("../app/monitor/page.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
   const migration = await readFile(new URL("../drizzle/0007_flowery_triton.sql", import.meta.url), "utf8");
   const proxy = await readFile(new URL("../proxy.ts", import.meta.url), "utf8");
@@ -427,15 +428,23 @@ test("soft-deletes and restores records for supervisors and admins with an audit
   assert.match(deleteHandler, /SET deleted_at = \?, deleted_by = \?, deleted_ip = \?, delete_reason = \?/);
   assert.match(deleteHandler, /INSERT INTO measurement_lifecycle_events/);
   assert.doesNotMatch(deleteHandler, /DELETE FROM measurements/);
+  assert.match(restoreHandler, /actor\.role !== "admin"/);
+  assert.match(restoreHandler, /只有 admin 可以從垃圾桶還原紀錄/);
   assert.match(restoreHandler, /SET deleted_at = NULL, deleted_by = NULL, deleted_ip = NULL, delete_reason = NULL/);
   assert.match(restoreHandler, /'restored'/);
   assert.match(page, /method: "DELETE"/);
   assert.match(page, /method: "PUT"/);
-  assert.match(page, /已刪除紀錄/);
+  assert.match(page, /🗑 垃圾桶（已刪除）/);
+  assert.match(page, /const canDelete = signedInUser\?\.role === "supervisor" \|\| signedInUser\?\.role === "admin"/);
+  assert.match(page, /const canRestore = signedInUser\?\.role === "admin"/);
+  assert.match(page, /已標註失效，並從總覽、圖表與統計中排除/);
   assert.doesNotMatch(page, /刪除密碼|deletePassword/);
   assert.match(page, /刪除原因/);
-  assert.match(page, /確定移至已刪除紀錄/);
+  assert.match(page, /確定移至垃圾桶/);
   assert.match(page, /確認還原紀錄/);
+  assert.doesNotMatch(styles, /button\.deleted-tab \{ margin-left: auto/);
+  assert.match(route, /\.filter\(\(item\) => !item\.deletion\)/);
+  assert.match(route, /status: deletion \? "已失效"/);
   assert.match(schema, /sqliteTable\("measurement_lifecycle_events"/);
   assert.match(migration, /ALTER TABLE `measurements` ADD `deleted_at` text/);
   assert.match(migration, /ALTER TABLE `measurements` ADD `deleted_ip` text/);
@@ -443,6 +452,16 @@ test("soft-deletes and restores records for supervisors and admins with an audit
   assert.match(migration, /ALTER TABLE `device_axle_profile_events` ADD `source_ip`/);
   assert.match(proxy, /pathname === "\/api\/lubrication" && request\.method === "DELETE"/);
   assert.match(proxy, /pathname === "\/api\/lubrication" && request\.method === "PUT"/);
+  assert.match(proxy, /request\.method === "PUT" && effectiveSession\.role !== "admin"/);
+
+  const worker = await loadWorker();
+  const supervisorCookie = await login(worker, "supervisor", "supervisor");
+  const supervisorRestoreResponse = await dispatch(worker, "/api/lubrication", {
+    method: "PUT",
+    headers: { "content-type": "application/json", cookie: supervisorCookie },
+    body: JSON.stringify({ measurementId: "MEASUREMENT-TEST", restoreReason: "權限測試" }),
+  });
+  assert.equal(supervisorRestoreResponse.status, 403);
 });
 
 test("adds soft-delete audit storage without losing existing measurement rows", async () => {

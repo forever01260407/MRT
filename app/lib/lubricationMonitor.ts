@@ -30,7 +30,7 @@ export type MonitoredLubricationRecord = {
   id: string;
   original: LubricationRecord;
   current: LubricationRecord;
-  status: "有效" | "已更正" | "已刪除";
+  status: "有效" | "已更正" | "已失效";
   sourceType: "Excel 匯入" | "現場登記";
   sourceName: string;
   createdBy: string;
