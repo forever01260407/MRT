@@ -168,7 +168,7 @@ async function assertAdminCanBeChanged(
 ) {
   if (row.username.toLowerCase() === actorUsername.toLowerCase()
     && (nextRole !== "admin" || nextStatus === "disabled")) {
-    throw new AccountProtectionError("目前登入的管理員不能停用或降級自己的帳號。");
+    throw new AccountProtectionError("目前登入的 ADMIN 不能停用或降級自己的帳號。");
   }
   const removesAvailableAdmin = row.role === "admin"
     && row.status !== "disabled"
@@ -178,7 +178,7 @@ async function assertAdminCanBeChanged(
     "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND status != 'disabled'",
   ).first<{ count: number }>();
   if ((remaining?.count ?? 0) <= 1) {
-    throw new AccountProtectionError("系統至少必須保留一個可使用的 admin 帳號。");
+    throw new AccountProtectionError("系統至少必須保留一個可使用的 ADMIN 帳號。");
   }
 }
 

@@ -98,7 +98,7 @@ export function resolveAuthSecret(url: URL, runtimeEnv: AuthRuntimeEnv) {
   const configuredSecret = runtimeEnv.AUTH_SECRET?.trim();
   if (configuredSecret && configuredSecret.length >= 32) return configuredSecret;
   if (isLocalAuthHostname(url.hostname)) return localDevelopmentSecret;
-  throw new AuthConfigurationError("登入服務尚未完成正式環境設定，請聯絡管理員。");
+  throw new AuthConfigurationError("登入服務尚未完成正式環境設定，請聯絡 ADMIN。");
 }
 
 function bytesToBase64Url(bytes: Uint8Array) {
@@ -211,7 +211,7 @@ export async function enforceLoginRateLimit(options: {
   const limiter = options.runtimeEnv.AUTH_RATE_LIMITER;
   if (!limiter) {
     if (!isLocalAuthHostname(requestUrl.hostname)) {
-      throw new AuthConfigurationError("登入流量保護尚未完成設定，請聯絡管理員。");
+      throw new AuthConfigurationError("登入流量保護尚未完成設定，請聯絡 ADMIN。");
     }
     return;
   }

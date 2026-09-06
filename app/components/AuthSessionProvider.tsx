@@ -2,11 +2,13 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { getRoleDisplayLabel, getRoleDisplayMark } from "../lib/rolePresentation";
+import type { RoleCode } from "../lib/rolePresentation";
 
 type SessionUser = {
   username: string;
   name: string;
-  role: "user" | "supervisor" | "admin";
+  role: Exclude<RoleCode, "userpro">;
   expiresAt: number;
 };
 
@@ -16,12 +18,6 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue>({ user: null, loading: true });
-
-const roleLabels: Record<SessionUser["role"], string> = {
-  user: "USER",
-  supervisor: "SUPERVISOR",
-  admin: "ADMIN",
-};
 
 export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -85,8 +81,11 @@ export function SessionMenu() {
 
   return (
     <div className="session-menu">
-      <span className={`session-role-mark ${user.role}`} aria-hidden="true">{user.role === "supervisor" ? "SV" : user.role.slice(0, 1).toUpperCase()}</span>
-      <span className="session-identity"><strong>{user.name}</strong><small>{roleLabels[user.role]} · @{user.username}</small></span>
+      <span className={`session-role-mark ${user.role}`} aria-hidden="true">{getRoleDisplayMark(user.role)}</span>
+      <span className="session-identity">
+        <strong>{user.name}</strong>
+        <small><span className={`role-display-badge ${user.role}`}>{getRoleDisplayLabel(user.role)}</span><span>@{user.username}</span></small>
+      </span>
       <button type="button" onClick={signOut} disabled={signingOut}>{signingOut ? "登出中" : "登出"}</button>
     </div>
   );

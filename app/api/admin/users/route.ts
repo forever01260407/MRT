@@ -20,7 +20,7 @@ async function requireAdmin(request: Request) {
 export async function GET(request: Request) {
   try {
     if (!await requireAdmin(request)) {
-      return Response.json({ error: "只有 admin 可以管理人員帳號。" }, { status: 403 });
+      return Response.json({ error: "只有 ADMIN 可以管理人員帳號。" }, { status: 403 });
     }
     const users = await listUsers(await getD1());
     return Response.json({ users }, { headers: { "Cache-Control": "no-store" } });
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
   try {
     const session = await requireAdmin(request);
     if (!session) {
-      return Response.json({ error: "只有 admin 可以建立人員帳號。" }, { status: 403 });
+      return Response.json({ error: "只有 ADMIN 可以建立人員帳號。" }, { status: 403 });
     }
 
     const payload = await request.json() as Record<string, unknown>;
@@ -76,7 +76,7 @@ export async function PATCH(request: Request) {
   try {
     const session = await requireAdmin(request);
     if (!session) {
-      return Response.json({ error: "只有 admin 可以管理人員帳號。" }, { status: 403 });
+      return Response.json({ error: "只有 ADMIN 可以管理人員帳號。" }, { status: 403 });
     }
 
     const payload = await request.json() as Record<string, unknown>;

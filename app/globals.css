@@ -488,12 +488,18 @@ button:focus-visible {
 }
 
 .session-menu-loading { width: 142px; opacity: .55; }
-.session-role-mark { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: #fff; background: #76859b; font-size: 9px; font-weight: 950; letter-spacing: .04em; }
-.session-role-mark.supervisor { background: #149479; }
-.session-role-mark.admin { color: #18183b; background: #f2c66d; }
+.session-role-mark { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: #fff; background: #667085; font-size: 9px; font-weight: 950; letter-spacing: .04em; }
+.session-role-mark.userpro { background: #2563eb; }
+.session-role-mark.supervisor { background: #c2410c; }
+.session-role-mark.admin { background: #c62845; }
 .session-identity { min-width: 0; display: grid; gap: 1px; }
 .session-identity strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.session-identity small { color: #aaa9d8; font-size: 8px; letter-spacing: .05em; white-space: nowrap; }
+.session-identity small { display: flex; align-items: center; gap: 5px; color: #aaa9d8; font-size: 8px; letter-spacing: .05em; white-space: nowrap; }
+.role-display-badge { min-height: 18px; padding: 3px 7px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #667085; border-radius: 5px; color: #fff; background: #667085; font-size: 8px; font-weight: 950; line-height: 1; letter-spacing: .045em; white-space: nowrap; }
+.role-display-badge.user { border-color: #667085; background: #667085; }
+.role-display-badge.userpro { border-color: #2563eb; background: #2563eb; }
+.role-display-badge.supervisor { border-color: #c2410c; background: #c2410c; }
+.role-display-badge.admin { border-color: #c62845; background: #c62845; }
 .session-menu > button { padding: 6px 8px; border: 0; border-left: 1px solid rgba(255, 255, 255, .14); color: #d9daf0; background: transparent; font-size: 9px; font-weight: 800; cursor: pointer; }
 .session-menu > button:hover { color: #fff; }
 .session-menu > button:disabled { opacity: .55; cursor: wait; }
@@ -1850,7 +1856,7 @@ button:focus-visible {
 .admin-kpi-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; color: #fff; background: #77879c; font-size: 10px; font-weight: 950; }
 .admin-kpi-icon.active { background: #168b78; }
 .admin-kpi-icon.attention { background: #d8951b; }
-.admin-kpi-icon.supervisor { background: var(--violet); }
+.admin-kpi-icon.supervisor { background: #c2410c; }
 .admin-kpi-icon.session { color: #3d47a2; background: #e8eaff; }
 .admin-kpi-grid article div { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
 .admin-kpi-grid small { align-self: end; color: var(--ink-soft); font-size: 9px; font-weight: 850; }
@@ -1869,10 +1875,10 @@ button:focus-visible {
 .admin-attention-list strong { font-size: 10px; }
 .admin-attention-list small { overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .admin-attention-list b { color: #b1b8c5; font-size: 15px; font-weight: 500; }
-.admin-user-avatar { width: 32px; height: 32px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 9px; color: #fff; background: #75869c; font-size: 8px; font-weight: 950; }
-.admin-user-avatar.supervisor { background: #168b78; }
-.admin-user-avatar.admin { background: var(--violet); }
-.admin-user-avatar.userpro { background: var(--unknown); }
+.admin-user-avatar { width: 32px; height: 32px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 9px; color: #fff; background: #667085; font-size: 8px; font-weight: 950; }
+.admin-user-avatar.userpro { background: #2563eb; }
+.admin-user-avatar.supervisor { background: #c2410c; }
+.admin-user-avatar.admin { background: #c62845; }
 .admin-user-avatar.large { width: 45px; height: 45px; border-radius: 12px; font-size: 11px; }
 .admin-status, .admin-role-badge, .admin-audit-result { display: inline-flex; align-items: center; justify-content: center; padding: 5px 7px; border-radius: 999px; font-size: 8px; font-weight: 900; white-space: nowrap; }
 .admin-status.active { color: #087b59; background: var(--success-soft); }
@@ -1913,9 +1919,11 @@ button:focus-visible {
 .admin-user-cell strong { color: var(--ink); font-size: 10px; }
 .admin-user-cell small { color: var(--muted); font-size: 8px; }
 .admin-username { color: var(--ink-soft); font-size: 9px; }
-.admin-role-badge { color: #4e5a6d; background: #edf0f4; letter-spacing: .035em; }
-.admin-role-badge.supervisor { color: #087463; background: #e5f7f2; }
-.admin-role-badge.admin { color: #4d42b6; background: var(--violet-soft); }
+.admin-role-badge { border: 1px solid #667085; border-radius: 5px; color: #fff; background: #667085; letter-spacing: .035em; }
+.admin-role-badge.user { border-color: #667085; background: #667085; }
+.admin-role-badge.userpro { border-color: #2563eb; background: #2563eb; }
+.admin-role-badge.supervisor { border-color: #c2410c; background: #c2410c; }
+.admin-role-badge.admin { border-color: #c62845; background: #c62845; }
 .admin-row-action { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--violet); background: #fff; font-size: 8px; font-weight: 900; cursor: pointer; }
 .admin-row-action:hover { border-color: var(--violet); background: var(--violet-soft); }
 .admin-empty { padding: 36px; display: grid; justify-items: center; gap: 4px; color: var(--muted); text-align: center; }
@@ -1923,11 +1931,11 @@ button:focus-visible {
 .admin-empty p { margin: 0; font-size: 9px; }
 .admin-role-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; }
 .admin-role-overview article { padding: 13px; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
-.admin-role-overview article > span { width: 34px; height: 34px; grid-row: span 2; display: grid; place-items: center; border-radius: 9px; color: #fff; background: #75869c; font-size: 9px; font-weight: 950; }
-.admin-role-overview article.supervisor > span { background: #168b78; }
-.admin-role-overview article.admin > span { background: var(--violet); }
+.admin-role-overview article > span { width: 34px; height: 34px; grid-row: span 2; display: grid; place-items: center; border-radius: 9px; color: #fff; background: #667085; font-size: 9px; font-weight: 950; }
+.admin-role-overview article.supervisor > span { background: #c2410c; }
+.admin-role-overview article.admin > span { background: #c62845; }
 .admin-role-overview article.paused { border-style: dashed; background: var(--unknown-soft); }
-.admin-role-overview article.paused > span { background: var(--unknown); }
+.admin-role-overview article.userpro > span { background: #2563eb; }
 .admin-role-overview article div { min-width: 0; display: grid; gap: 2px; }
 .admin-role-overview strong { font-size: 10px; }
 .admin-role-overview small { overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }

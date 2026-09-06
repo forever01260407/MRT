@@ -53,7 +53,7 @@ export async function authorizeAdminWriteRequest(options: {
 
   if (!limiter) {
     if (!isLocalHostname(requestUrl.hostname)) {
-      throw new AdminWriteAuthorizationError("管理操作的流量保護尚未完成設定，請聯絡管理員。", 503);
+      throw new AdminWriteAuthorizationError("管理操作的流量保護尚未完成設定，請聯絡 ADMIN。", 503);
     }
   } else {
     const clientAddress = options.request.headers.get("CF-Connecting-IP")?.trim() || "unknown-client";
@@ -66,7 +66,7 @@ export async function authorizeAdminWriteRequest(options: {
   const expectedPassword = options.runtimeEnv.ADMIN_PASSWORD?.trim()
     || options.runtimeEnv.DELETE_PASSWORD?.trim();
   if (!expectedPassword) {
-    throw new AdminWriteAuthorizationError("網站管理密碼尚未完成設定，請聯絡管理員。", 503);
+    throw new AdminWriteAuthorizationError("網站管理密碼尚未完成設定，請聯絡 ADMIN。", 503);
   }
 
   if (!timingSafeEqual(options.password, expectedPassword)) {

@@ -52,7 +52,7 @@ export async function authorizeDeleteRequest(options: {
 
   if (!limiter) {
     if (!isLocalHostname(requestUrl.hostname)) {
-      throw new DeleteAuthorizationError("刪除功能的流量保護尚未完成設定，請聯絡管理員。", 503);
+      throw new DeleteAuthorizationError("刪除功能的流量保護尚未完成設定，請聯絡 ADMIN。", 503);
     }
   } else {
     const clientAddress = options.request.headers.get("CF-Connecting-IP")?.trim() || "unknown-client";
@@ -64,7 +64,7 @@ export async function authorizeDeleteRequest(options: {
 
   const expectedPassword = options.runtimeEnv.DELETE_PASSWORD?.trim();
   if (!expectedPassword) {
-    throw new DeleteAuthorizationError("刪除密碼尚未完成設定，請聯絡管理員。", 503);
+    throw new DeleteAuthorizationError("刪除密碼尚未完成設定，請聯絡 ADMIN。", 503);
   }
 
   if (!timingSafeEqual(options.password, expectedPassword)) {

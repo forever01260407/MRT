@@ -270,6 +270,8 @@ test("server-renders the operational admin area framework", async () => {
   const html = await response.text();
   const page = await readFile(new URL("../app/admin-area/page.tsx", import.meta.url), "utf8");
   const authChrome = await readFile(new URL("../app/components/AuthSessionProvider.tsx", import.meta.url), "utf8");
+  const rolePresentation = await readFile(new URL("../app/lib/rolePresentation.ts", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(html, /管理總覽/);
   assert.match(html, /帳號安全提醒/);
@@ -282,14 +284,25 @@ test("server-renders the operational admin area framework", async () => {
   assert.match(page, /角色與權限/);
   assert.match(page, /操作紀錄/);
   assert.match(page, /登入與安全/);
-  assert.match(page, /userpro（未啟用）/);
+  assert.match(page, /AD USER（未啟用）/);
   assert.match(page, /功能權限矩陣/);
+  assert.match(rolePresentation, /user: "USER"/);
+  assert.match(rolePresentation, /userpro: "AD USER"/);
+  assert.match(rolePresentation, /supervisor: "POWER USER"/);
+  assert.match(rolePresentation, /admin: "ADMIN"/);
+  assert.match(authChrome, /getRoleDisplayLabel\(user\.role\)/);
+  assert.match(page, /getRoleDisplayLabel\(user\.role\)/);
+  assert.match(page, /getRoleDisplayLabel\(role\)/);
+  assert.match(styles, /\.role-display-badge\.user \{[^}]*#667085/);
+  assert.match(styles, /\.role-display-badge\.userpro \{[^}]*#2563eb/);
+  assert.match(styles, /\.role-display-badge\.supervisor \{[^}]*#c2410c/);
+  assert.match(styles, /\.role-display-badge\.admin \{[^}]*#c62845/);
   assert.doesNotMatch(page, /首次登入時要求更換密碼|強制更換暫時密碼|forcePasswordChange/);
   assert.match(page, /登入帳號／顯示名稱/);
   assert.match(page, /建立時間/);
   assert.match(page, /formatStoredTimestamp\(user\.createdAtRaw, true\)/);
   assert.match(page, /user\.createdBy === "system"/);
-  assert.match(page, /placeholder="由管理員自行設定"/);
+  assert.match(page, /placeholder="由 ADMIN 自行設定"/);
   assert.doesNotMatch(page, /minLength=|至少 8 個字元/);
 });
 
@@ -429,7 +442,7 @@ test("lets supervisors and admins move records to Trash while only admins can re
   assert.match(deleteHandler, /INSERT INTO measurement_lifecycle_events/);
   assert.doesNotMatch(deleteHandler, /DELETE FROM measurements/);
   assert.match(restoreHandler, /actor\.role !== "admin"/);
-  assert.match(restoreHandler, /只有 admin 可以從垃圾桶還原紀錄/);
+  assert.match(restoreHandler, /只有 ADMIN 可以從垃圾桶還原紀錄/);
   assert.match(restoreHandler, /SET deleted_at = NULL, deleted_by = NULL, deleted_ip = NULL, delete_reason = NULL/);
   assert.match(restoreHandler, /'restored'/);
   assert.match(page, /method: "DELETE"/);
