@@ -144,3 +144,33 @@ export const signInEvents = sqliteTable("sign_in_events", {
   check("sign_in_events_success_valid", sql`${table.success} IN (0, 1)`),
   check("sign_in_events_outcome_valid", sql`${table.outcome} IN ('success', 'invalid_credentials', 'account_not_found', 'account_disabled', 'account_locked', 'rate_limited')`),
 ]);
+
+export const auditEvents = sqliteTable("audit_events", {
+  id: text("id").primaryKey(),
+  occurredAt: text("occurred_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  actorUserId: text("actor_user_id").references(() => users.id),
+  actorUsername: text("actor_username").notNull(),
+  actorRole: text("actor_role").notNull(),
+  sourceIp: text("source_ip").notNull(),
+  userAgent: text("user_agent"),
+  requestId: text("request_id").notNull(),
+  action: text("action").notNull(),
+  resourceType: text("resource_type").notNull(),
+  resourceId: text("resource_id"),
+  resourceLabel: text("resource_label"),
+  beforeJson: text("before_json"),
+  afterJson: text("after_json"),
+  reason: text("reason"),
+  result: text("result").notNull(),
+  errorCode: text("error_code"),
+  metadataJson: text("metadata_json"),
+  originType: text("origin_type"),
+  originId: text("origin_id"),
+}, (table) => [
+  index("idx_audit_events_occurred_at").on(table.occurredAt),
+  index("idx_audit_events_actor_occurred_at").on(table.actorUsername, table.occurredAt),
+  index("idx_audit_events_action_occurred_at").on(table.action, table.occurredAt),
+  index("idx_audit_events_resource").on(table.resourceType, table.resourceId),
+  uniqueIndex("audit_events_origin_uidx").on(table.originType, table.originId),
+  check("audit_events_result_valid", sql`${table.result} IN ('success', 'failure')`),
+]);

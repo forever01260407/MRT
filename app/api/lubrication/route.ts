@@ -1,10 +1,11 @@
 import { getD1 } from "../../../db";
 import { getActiveRequestUser } from "../../lib/authorizedUser";
 import { initialLubricationRecords } from "../../lib/initialLubricationRecords";
+import { ensureAuditEventsTable, prepareAuditEvent } from "../../lib/auditLog";
 import { DEVICE_AXLE_PROFILE_TABLE_SQL, listDeviceAxleProfiles } from "../../lib/deviceAxleProfile";
 import type { LubricationRecord, LubricationRecordType } from "../../lib/lubricationExcel";
 import type { LubricationRevision, MonitoredLubricationRecord } from "../../lib/lubricationMonitor";
-import { getRequestSourceIp } from "../../lib/requestContext";
+import { getRequestAuditContext } from "../../lib/requestContext";
 
 const INITIAL_BATCH_ID = "initial-excel-2026-08-19";
 const MAX_IMPORT_RECORDS = 500;
@@ -329,6 +330,7 @@ function lifecycleRowToEvent(row: StoredLifecycleEventRow) {
 }
 
 async function initializeDatabase(d1: D1Database) {
+  await ensureAuditEventsTable(d1);
   await d1.batch([
     d1.prepare(`CREATE TABLE IF NOT EXISTS import_batches (
       id TEXT PRIMARY KEY NOT NULL,
@@ -613,17 +615,19 @@ export async function POST(request: Request) {
 
     const batchId = crypto.randomUUID();
     const createdBy = actor.username;
-    const createdIp = getRequestSourceIp(request);
+    const requestContext = getRequestAuditContext(request);
+    const createdIp = requestContext.sourceIp;
+    const storedRecords = newRecords.map((record) => ({ id: crypto.randomUUID(), record }));
     await d1.batch([
       d1.prepare(`INSERT INTO import_batches
         (id, file_name, file_hash, submitted_count, inserted_count, duplicate_count, uploaded_by)
         VALUES (?, ?, ?, ?, ?, ?, ?)`)
         .bind(batchId, payload.fileName, payload.fileHash, payload.submittedCount, newRecords.length, duplicateCount, createdBy),
-      ...newRecords.map((record) => d1.prepare(`INSERT INTO measurements
+      ...storedRecords.map(({ id, record }) => d1.prepare(`INSERT INTO measurements
         (id, device_id, measured_at, oil_level, inspector, record_type, refill_amount, import_batch_id, created_by, created_ip)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .bind(
-          crypto.randomUUID(),
+          id,
           record.deviceId,
           record.measuredAt,
           record.oilLevel,
@@ -634,6 +638,25 @@ export async function POST(request: Request) {
           createdBy,
           createdIp,
         )),
+      prepareAuditEvent(d1, {
+        actorUsername: actor.username,
+        actorRole: actor.role,
+        ...requestContext,
+        action: isManualEntry ? "lubrication.measurement_created" : "lubrication.excel_imported",
+        resourceType: "import_batch",
+        resourceId: batchId,
+        resourceLabel: payload.fileName,
+        after: isManualEntry
+          ? { recordId: storedRecords[0]?.id ?? null, record: storedRecords[0]?.record ?? null }
+          : {
+              submittedCount: payload.submittedCount,
+              insertedCount: newRecords.length,
+              duplicateCount,
+              recordIds: storedRecords.map((item) => item.id),
+            },
+        originType: "import_batch",
+        originId: batchId,
+      }),
     ]);
 
     const records = await listMeasurements(d1);
@@ -688,13 +711,15 @@ export async function PATCH(request: Request) {
 
     const revisionNo = (target.revisions.at(-1)?.revisionNo ?? 0) + 1;
     const createdAt = new Date().toISOString();
-    const sourceIp = getRequestSourceIp(request);
-    await d1.prepare(`INSERT INTO measurement_revisions
+    const requestContext = getRequestAuditContext(request);
+    const sourceIp = requestContext.sourceIp;
+    const revisionId = crypto.randomUUID();
+    await d1.batch([d1.prepare(`INSERT INTO measurement_revisions
       (id, measurement_id, revision_no, device_id, measured_at, oil_level, inspector, record_type,
        refill_amount, correction_reason, corrected_by, created_by, source_ip, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
-        crypto.randomUUID(),
+        revisionId,
         target.id,
         revisionNo,
         payload.record.deviceId,
@@ -709,7 +734,21 @@ export async function PATCH(request: Request) {
         sourceIp,
         createdAt,
       )
-      .run();
+      , prepareAuditEvent(d1, {
+        actorUsername: actor.username,
+        actorRole: actor.role,
+        ...requestContext,
+        action: "lubrication.measurement_corrected",
+        resourceType: "measurement",
+        resourceId: target.id,
+        resourceLabel: `${payload.record.deviceId}｜${payload.record.measuredAt.slice(0, 10)}`,
+        before: target.current,
+        after: { ...payload.record, revisionNo },
+        reason: payload.correctionReason,
+        originType: "measurement_revision",
+        originId: revisionId,
+        occurredAt: createdAt,
+      })]);
 
     return Response.json({
       ...buildMonitorPayload(await listMonitoredMeasurements(d1)),
@@ -746,7 +785,9 @@ export async function DELETE(request: Request) {
     }
 
     const deletedAt = new Date().toISOString();
-    const sourceIp = getRequestSourceIp(request);
+    const requestContext = getRequestAuditContext(request);
+    const sourceIp = requestContext.sourceIp;
+    const lifecycleId = `LIFE-${crypto.randomUUID().toUpperCase()}`;
     await d1.batch([
       d1.prepare(`UPDATE measurements
         SET deleted_at = ?, deleted_by = ?, deleted_ip = ?, delete_reason = ?
@@ -755,7 +796,22 @@ export async function DELETE(request: Request) {
       d1.prepare(`INSERT INTO measurement_lifecycle_events
         (id, measurement_id, action, reason, actor, source_ip, created_at)
         VALUES (?, ?, 'deleted', ?, ?, ?, ?)`)
-        .bind(`LIFE-${crypto.randomUUID().toUpperCase()}`, target.id, payload.deleteReason, actor.username, sourceIp, deletedAt),
+        .bind(lifecycleId, target.id, payload.deleteReason, actor.username, sourceIp, deletedAt),
+      prepareAuditEvent(d1, {
+        actorUsername: actor.username,
+        actorRole: actor.role,
+        ...requestContext,
+        action: "lubrication.measurement_soft_deleted",
+        resourceType: "measurement",
+        resourceId: target.id,
+        resourceLabel: `${target.current.deviceId}｜${target.current.measuredAt.slice(0, 10)}`,
+        before: { ...target.current, status: "active" },
+        after: { ...target.current, status: "deleted" },
+        reason: payload.deleteReason,
+        originType: "measurement_lifecycle",
+        originId: lifecycleId,
+        occurredAt: deletedAt,
+      }),
     ]);
 
     return Response.json({
@@ -779,8 +835,8 @@ export async function PUT(request: Request) {
     if (!actor) {
       return Response.json({ error: "請先登入後再還原紀錄。" }, { status: 401 });
     }
-    if (actor.role !== "admin") {
-      return Response.json({ error: "只有 ADMIN 可以從垃圾桶還原紀錄。" }, { status: 403 });
+    if (actor.role === "user") {
+      return Response.json({ error: "只有 POWER USER 或 ADMIN 可以從垃圾桶還原紀錄。" }, { status: 403 });
     }
     const payload = parseRestorePayload(await request.json());
     const d1 = await getD1();
@@ -792,7 +848,9 @@ export async function PUT(request: Request) {
     }
 
     const restoredAt = new Date().toISOString();
-    const sourceIp = getRequestSourceIp(request);
+    const requestContext = getRequestAuditContext(request);
+    const sourceIp = requestContext.sourceIp;
+    const lifecycleId = `LIFE-${crypto.randomUUID().toUpperCase()}`;
     await d1.batch([
       d1.prepare(`UPDATE measurements
         SET deleted_at = NULL, deleted_by = NULL, deleted_ip = NULL, delete_reason = NULL
@@ -801,7 +859,22 @@ export async function PUT(request: Request) {
       d1.prepare(`INSERT INTO measurement_lifecycle_events
         (id, measurement_id, action, reason, actor, source_ip, created_at)
         VALUES (?, ?, 'restored', ?, ?, ?, ?)`)
-        .bind(`LIFE-${crypto.randomUUID().toUpperCase()}`, target.id, payload.restoreReason, actor.username, sourceIp, restoredAt),
+        .bind(lifecycleId, target.id, payload.restoreReason, actor.username, sourceIp, restoredAt),
+      prepareAuditEvent(d1, {
+        actorUsername: actor.username,
+        actorRole: actor.role,
+        ...requestContext,
+        action: "lubrication.measurement_restored",
+        resourceType: "measurement",
+        resourceId: target.id,
+        resourceLabel: `${target.current.deviceId}｜${target.current.measuredAt.slice(0, 10)}`,
+        before: { ...target.current, status: "deleted" },
+        after: { ...target.current, status: "active" },
+        reason: payload.restoreReason,
+        originType: "measurement_lifecycle",
+        originId: lifecycleId,
+        occurredAt: restoredAt,
+      }),
     ]);
 
     return Response.json({

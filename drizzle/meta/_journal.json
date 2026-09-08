@@ -57,6 +57,13 @@
       "when": 1788631543677,
       "tag": "0007_flowery_triton",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788892761574,
+      "tag": "0008_lying_slayback",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,8 @@
 import { getD1 } from "../../../../db";
 import { getRequestAuthSession } from "../../../lib/auth";
 import type { AuthRole } from "../../../lib/auth";
+import type { AuditContext } from "../../../lib/auditLog";
+import { getRequestAuditContext } from "../../../lib/requestContext";
 import {
   AccountProtectionError,
   createStoredUser,
@@ -15,6 +17,14 @@ import {
 async function requireAdmin(request: Request) {
   const session = await getRequestAuthSession(request);
   return session?.role === "admin" ? session : null;
+}
+
+function getAdminAuditContext(request: Request, session: { username: string; role: AuthRole }): AuditContext {
+  return {
+    actorUsername: session.username,
+    actorRole: session.role,
+    ...getRequestAuditContext(request),
+  };
 }
 
 export async function GET(request: Request) {
@@ -59,6 +69,7 @@ export async function POST(request: Request) {
       role,
       password,
       createdBy: session.username,
+      audit: getAdminAuditContext(request, session),
     });
     return Response.json({ user }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
@@ -92,7 +103,11 @@ export async function PATCH(request: Request) {
       if (!password) {
         return Response.json({ error: "請輸入新的登入密碼。" }, { status: 400 });
       }
-      const user = await resetStoredUserPassword(database, { userId, password });
+      const user = await resetStoredUserPassword(database, {
+        userId,
+        password,
+        audit: getAdminAuditContext(request, session),
+      });
       return Response.json({ user }, { headers: { "Cache-Control": "no-store" } });
     }
 
@@ -105,6 +120,7 @@ export async function PATCH(request: Request) {
         userId,
         status,
         actorUsername: session.username,
+        audit: getAdminAuditContext(request, session),
       });
       return Response.json({ user }, { headers: { "Cache-Control": "no-store" } });
     }
@@ -118,6 +134,7 @@ export async function PATCH(request: Request) {
         userId,
         role,
         actorUsername: session.username,
+        audit: getAdminAuditContext(request, session),
       });
       return Response.json({ user }, { headers: { "Cache-Control": "no-store" } });
     }

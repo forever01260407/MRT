@@ -1,6 +1,6 @@
 import { getD1 } from "../../../db";
 import { getActiveRequestUser } from "../../lib/authorizedUser";
-import { getRequestSourceIp } from "../../lib/requestContext";
+import { getRequestAuditContext } from "../../lib/requestContext";
 import {
   ensureDeviceAxleProfileTable,
   listDeviceAxleProfileEvents,
@@ -96,10 +96,16 @@ export async function PUT(request: Request) {
     const existing = await d1.prepare("SELECT device_id FROM device_axle_profiles WHERE device_id = ? LIMIT 1")
       .bind(payload.profile.deviceId)
       .first<{ device_id: string }>();
+    const requestContext = getRequestAuditContext(request);
     const profile = await upsertDeviceAxleProfile(d1, {
       ...payload.profile,
       updatedBy: actor.username,
-      sourceIp: getRequestSourceIp(request),
+      sourceIp: requestContext.sourceIp,
+      audit: {
+        actorUsername: actor.username,
+        actorRole: actor.role,
+        ...requestContext,
+      },
     });
     const deviceAxleProfiles = await listDeviceAxleProfiles(d1);
     return Response.json({

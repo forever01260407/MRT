@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
 import { AdminNavItem, SessionMenu, useAuthSession } from "../components/AuthSessionProvider";
@@ -47,6 +47,30 @@ type StoredSignInEvent = {
   createdAt: string;
 };
 
+type StoredAuditEvent = {
+  id: string;
+  occurredAt: string;
+  actorUserId: string | null;
+  actorUsername: string;
+  actorRole: string;
+  sourceIp: string;
+  userAgent: string | null;
+  requestId: string;
+  action: string;
+  resourceType: string;
+  resourceId: string | null;
+  resourceLabel: string | null;
+  before: unknown;
+  after: unknown;
+  reason: string | null;
+  result: "success" | "failure";
+  errorCode: string | null;
+  metadata: unknown;
+  originType: string | null;
+  originId: string | null;
+  historical: boolean;
+};
+
 const sectionItems: Array<{ id: AdminSection; marker: string; label: string; description: string }> = [
   { id: "overview", marker: "總", label: "總覽", description: "帳號與系統摘要" },
   { id: "users", marker: "人", label: "人員帳號", description: "新增、停用與重設" },
@@ -59,7 +83,7 @@ const sectionCopy: Record<AdminSection, { eyebrow: string; title: string; descri
   overview: { eyebrow: "ADMINISTRATION OVERVIEW", title: "管理總覽", description: "掌握帳號狀態、待處理事項與最近管理操作。" },
   users: { eyebrow: "USER ADMINISTRATION", title: "人員帳號", description: "建立帳號、調整角色並處理鎖定或停用狀態。" },
   roles: { eyebrow: "ROLES & PERMISSIONS", title: "角色與權限", description: "確認每一種角色可以查看及操作的系統功能。" },
-  audit: { eyebrow: "AUDIT EVENTS", title: "操作紀錄", description: "保留 ADMIN 與高風險操作的完整追蹤資訊。" },
+  audit: { eyebrow: "AUDIT EVENTS", title: "操作紀錄", description: "保留帳號、登入與資料操作的完整追蹤資訊。" },
   security: { eyebrow: "SIGN-IN & SECURITY", title: "登入與安全", description: "查看使用中的登入階段、登入事件與安全規則。" },
 };
 
@@ -77,7 +101,7 @@ const permissions = [
   { label: "更正量測紀錄", group: "資料", user: false, userpro: false, supervisor: true, admin: true },
   { label: "設定設備階軸", group: "設備", user: false, userpro: false, supervisor: true, admin: true },
   { label: "軟刪除紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true },
-  { label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: false, admin: true },
+  { label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true },
   { label: "管理人員與角色", group: "管理", user: false, userpro: false, supervisor: false, admin: true },
   { label: "查看完整操作紀錄", group: "管理", user: false, userpro: false, supervisor: false, admin: true },
 ] as const;
@@ -92,6 +116,72 @@ const signInOutcomeLabels: Record<SignInOutcome, string> = {
   account_locked: "帳號鎖定中",
   rate_limited: "嘗試過於頻繁",
 };
+
+const auditActionLabels: Record<string, string> = {
+  "auth.login_success": "登入成功",
+  "auth.login_failure": "登入失敗",
+  "auth.logout": "登出",
+  "user.created": "建立帳號",
+  "user.role_changed": "變更角色",
+  "user.status_changed": "停用／啟用帳號",
+  "user.password_reset": "重設密碼",
+  "lubrication.measurement_created": "新增油耗紀錄",
+  "lubrication.excel_imported": "匯入油耗資料",
+  "lubrication.measurement_corrected": "更正油耗紀錄",
+  "lubrication.measurement_soft_deleted": "刪除油耗紀錄",
+  "lubrication.measurement_restored": "還原油耗紀錄",
+  "device_axle.created": "建立階軸設定",
+  "device_axle.updated": "變更階軸設定",
+};
+
+const auditResourceLabels: Record<string, string> = {
+  authentication: "登入驗證",
+  user: "使用者帳號",
+  import_batch: "油耗資料批次",
+  measurement: "油耗紀錄",
+  device_axle_profile: "設備階軸設定",
+};
+
+function auditActorLabel(username: string) {
+  return username === "system" ? "系統" : `@${username}`;
+}
+
+function auditRoleLabel(role: string) {
+  if (role === "system") return "系統";
+  if (role === "anonymous") return "未驗證";
+  if (role === "歷史未提供") return role;
+  if (role === "user" || role === "userpro" || role === "supervisor" || role === "admin") {
+    return getRoleDisplayLabel(role);
+  }
+  return role;
+}
+
+function auditActionLabel(action: string) {
+  return auditActionLabels[action] ?? action;
+}
+
+function auditResourceLabel(event: StoredAuditEvent) {
+  const category = auditResourceLabels[event.resourceType] ?? event.resourceType;
+  const identity = event.resourceLabel ?? event.resourceId;
+  return identity ? `${category}｜${identity}` : category;
+}
+
+function taipeiCalendarDate(value: string) {
+  const date = parseStoredTimestamp(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function formatAuditSnapshot(value: unknown) {
+  if (value === null || value === undefined) return "歷史未提供";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
+}
 
 function userInitials(name: string) {
   return name.slice(0, 2);
@@ -153,6 +243,31 @@ export default function AdminAreaPage() {
   const [lockedAccountCount, setLockedAccountCount] = useState(0);
   const [securityLoading, setSecurityLoading] = useState(true);
   const [securityError, setSecurityError] = useState("");
+  const [auditEvents, setAuditEvents] = useState<StoredAuditEvent[]>([]);
+  const [auditLoading, setAuditLoading] = useState(true);
+  const [auditError, setAuditError] = useState("");
+  const [auditQuery, setAuditQuery] = useState("");
+  const [auditActionFilter, setAuditActionFilter] = useState("all");
+  const [auditRoleFilter, setAuditRoleFilter] = useState("all");
+  const [auditResultFilter, setAuditResultFilter] = useState<"all" | "success" | "failure">("all");
+  const [auditDateFrom, setAuditDateFrom] = useState("");
+  const [auditDateTo, setAuditDateTo] = useState("");
+  const [selectedAuditEvent, setSelectedAuditEvent] = useState<StoredAuditEvent | null>(null);
+
+  const refreshAuditEvents = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await fetch("/api/admin/audit?limit=1000", { cache: "no-store", signal });
+      const payload = await response.json() as { events?: StoredAuditEvent[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || "無法讀取完整操作紀錄。");
+      setAuditEvents(payload.events ?? []);
+      setAuditError("");
+    } catch (error) {
+      if (signal?.aborted) return;
+      setAuditError(error instanceof Error ? error.message : "無法讀取完整操作紀錄。");
+    } finally {
+      if (!signal?.aborted) setAuditLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -171,6 +286,27 @@ export default function AdminAreaPage() {
         if (controller.signal.aborted) return;
         setAccountsError(error instanceof Error ? error.message : "無法讀取人員帳號。");
         setAccountsLoading(false);
+      });
+    return () => controller.abort();
+  }, [authenticatedUser?.username]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/admin/audit?limit=1000", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json() as { events?: StoredAuditEvent[]; error?: string };
+        if (!response.ok) throw new Error(payload.error || "無法讀取完整操作紀錄。");
+        return payload.events ?? [];
+      })
+      .then((events) => {
+        setAuditEvents(events);
+        setAuditError("");
+        setAuditLoading(false);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setAuditError(error instanceof Error ? error.message : "無法讀取完整操作紀錄。");
+        setAuditLoading(false);
       });
     return () => controller.abort();
   }, [authenticatedUser?.username]);
@@ -222,16 +358,33 @@ export default function AdminAreaPage() {
     });
   }, [query, roleFilter, statusFilter, users]);
 
-  const auditEvents = useMemo(() => [...users]
-    .sort((left, right) => right.createdAtRaw.localeCompare(left.createdAtRaw))
-    .map((user) => ({
-      time: formatStoredTimestamp(user.createdAtRaw, true),
-      actor: user.createdBy === "system" ? "系統" : `@${user.createdBy}`,
-      action: "建立帳號",
-      target: `@${user.username}`,
-      result: "完成",
-      tone: "success",
-    })), [users]);
+  const auditActionOptions = useMemo(() => [...new Set(auditEvents.map((event) => event.action))]
+    .sort((left, right) => auditActionLabel(left).localeCompare(auditActionLabel(right), "zh-Hant")), [auditEvents]);
+
+  const auditRoleOptions = useMemo(() => [...new Set(auditEvents.map((event) => event.actorRole))]
+    .sort((left, right) => auditRoleLabel(left).localeCompare(auditRoleLabel(right), "zh-Hant")), [auditEvents]);
+
+  const filteredAuditEvents = useMemo(() => {
+    const normalizedQuery = auditQuery.trim().toLowerCase();
+    return auditEvents.filter((event) => {
+      const searchable = [
+        event.actorUsername,
+        event.sourceIp,
+        auditActionLabel(event.action),
+        event.action,
+        auditResourceLabel(event),
+        event.resourceId,
+        event.reason,
+      ].filter(Boolean).join(" ").toLowerCase();
+      const calendarDate = taipeiCalendarDate(event.occurredAt);
+      return (!normalizedQuery || searchable.includes(normalizedQuery))
+        && (auditActionFilter === "all" || event.action === auditActionFilter)
+        && (auditRoleFilter === "all" || event.actorRole === auditRoleFilter)
+        && (auditResultFilter === "all" || event.result === auditResultFilter)
+        && (!auditDateFrom || calendarDate >= auditDateFrom)
+        && (!auditDateTo || calendarDate <= auditDateTo);
+    });
+  }, [auditActionFilter, auditDateFrom, auditDateTo, auditEvents, auditQuery, auditResultFilter, auditRoleFilter]);
 
   const openSection = (section: AdminSection) => {
     setActiveSection(section);
@@ -288,6 +441,7 @@ export default function AdminAreaPage() {
     setAccountActionError("");
     try {
       const updatedUser = await patchSelectedUser({ action: "reset_password", password });
+      void refreshAuditEvents();
       formElement.reset();
       closeUser();
       setFlash(`${updatedUser.name} 的登入密碼已更新，可立即使用新密碼登入。`);
@@ -307,6 +461,7 @@ export default function AdminAreaPage() {
     setAccountActionError("");
     try {
       const updatedUser = await patchSelectedUser({ action: "set_status", status: nextStatus });
+      void refreshAuditEvents();
       closeUser();
       setFlash(nextStatus === "disabled"
         ? `${updatedUser.name} 的帳號已停用，現在無法登入。`
@@ -324,6 +479,7 @@ export default function AdminAreaPage() {
     setAccountActionError("");
     try {
       const updatedUser = await patchSelectedUser({ action: "set_role", role });
+      void refreshAuditEvents();
       closeUser();
       setFlash(`${updatedUser.name} 的角色已更新為 ${getRoleDisplayLabel(updatedUser.role)}。`);
     } catch (error) {
@@ -362,6 +518,7 @@ export default function AdminAreaPage() {
       if (!response.ok || !payload.user) throw new Error(payload.error || "帳號建立失敗。");
       const newUser = storedUserToManagedUser(payload.user, authenticatedUser?.username);
       setUsers((current) => [newUser, ...current]);
+      void refreshAuditEvents();
       formElement.reset();
       setIsCreateOpen(false);
       setActiveSection("users");
@@ -446,10 +603,10 @@ export default function AdminAreaPage() {
                   </section>
 
                   <section className="admin-panel" aria-labelledby="recent-audit-title">
-                    <header className="admin-panel-heading"><div><span className="panel-kicker">RECENT ACTIVITY</span><h3 id="recent-audit-title">最近管理操作</h3></div><button type="button" onClick={() => openSection("audit")}>完整紀錄</button></header>
+                    <header className="admin-panel-heading"><div><span className="panel-kicker">RECENT ACTIVITY</span><h3 id="recent-audit-title">最近系統操作</h3></div><button type="button" onClick={() => openSection("audit")}>完整紀錄</button></header>
                     <div className="admin-recent-list">
                       {auditEvents.slice(0, 4).map((event) => (
-                        <div key={`${event.time}-${event.action}-${event.target}`}><span className={`admin-event-dot ${event.tone}`} aria-hidden="true"></span><div><strong>{event.action}</strong><p>{event.actor} · {event.target}</p></div><time>{event.time}</time></div>
+                        <div key={event.id}><span className={`admin-event-dot ${event.result}`} aria-hidden="true"></span><div><strong>{auditActionLabel(event.action)}</strong><p>{auditActorLabel(event.actorUsername)} · {auditResourceLabel(event)}</p></div><time>{formatStoredTimestamp(event.occurredAt, true)}</time></div>
                       ))}
                     </div>
                   </section>
@@ -458,7 +615,7 @@ export default function AdminAreaPage() {
                 <section className="admin-health-strip" aria-label="管理系統狀態">
                   <div><span className="pulse-dot" aria-hidden="true"></span><strong>帳號服務正常</strong><small>最後檢查：剛剛</small></div>
                   <div><span aria-hidden="true">DB</span><strong>D1 資料庫</strong><small>{accountsError ? "帳號資料讀取失敗" : accountsLoading ? "同步中" : "連線正常"}</small></div>
-                  <div><span aria-hidden="true">LOG</span><strong>稽核紀錄</strong><small>持續寫入</small></div>
+                  <div><span aria-hidden="true">LOG</span><strong>稽核紀錄</strong><small>{auditError ? "讀取失敗" : auditLoading ? "同步中" : `${auditEvents.length} 筆可查`}</small></div>
                   <button type="button" onClick={() => openSection("security")}>查看登入安全 →</button>
                 </section>
               </div>
@@ -516,12 +673,36 @@ export default function AdminAreaPage() {
             ) : null}
 
             {activeSection === "audit" ? (
-              <section className="admin-panel" aria-labelledby="audit-title">
-                <header className="admin-panel-heading"><div><span className="panel-kicker">AUDIT TRAIL</span><h3 id="audit-title">最近操作事件</h3></div><button type="button" className="admin-secondary-button" disabled>匯出紀錄</button></header>
-                <div className="admin-table-wrap">
-                  <table className="admin-table admin-audit-table"><thead><tr><th>建立時間</th><th>建立者</th><th>動作</th><th>帳號</th><th>結果</th></tr></thead><tbody>{auditEvents.map((event) => <tr key={`${event.time}-${event.action}-${event.target}`}><td><time>{event.time}</time></td><td>{event.actor}</td><td><strong>{event.action}</strong></td><td>{event.target}</td><td><span className={`admin-audit-result ${event.tone}`}>{event.result}</span></td></tr>)}</tbody></table>
+              <section className="admin-panel admin-audit-panel" aria-labelledby="audit-title">
+                <header className="admin-panel-heading"><div><span className="panel-kicker">AUDIT TRAIL</span><h3 id="audit-title">完整操作事件</h3></div><button type="button" className="admin-secondary-button" onClick={() => { setAuditLoading(true); void refreshAuditEvents(); }} disabled={auditLoading}>{auditLoading ? "更新中…" : "重新整理"}</button></header>
+                <div className="admin-audit-toolbar">
+                  <label className="admin-search"><span>關鍵字</span><input value={auditQuery} onChange={(event) => setAuditQuery(event.target.value)} placeholder="帳號、IP、動作或操作對象" /></label>
+                  <label><span>動作</span><select value={auditActionFilter} onChange={(event) => setAuditActionFilter(event.target.value)}><option value="all">全部動作</option>{auditActionOptions.map((action) => <option key={action} value={action}>{auditActionLabel(action)}</option>)}</select></label>
+                  <label><span>操作者角色</span><select value={auditRoleFilter} onChange={(event) => setAuditRoleFilter(event.target.value)}><option value="all">全部角色</option>{auditRoleOptions.map((role) => <option key={role} value={role}>{auditRoleLabel(role)}</option>)}</select></label>
+                  <label><span>結果</span><select value={auditResultFilter} onChange={(event) => setAuditResultFilter(event.target.value as typeof auditResultFilter)}><option value="all">全部結果</option><option value="success">成功</option><option value="failure">失敗</option></select></label>
+                  <label><span>開始日期</span><input type="date" value={auditDateFrom} max={auditDateTo || undefined} onChange={(event) => setAuditDateFrom(event.target.value)} /></label>
+                  <label><span>結束日期</span><input type="date" value={auditDateTo} min={auditDateFrom || undefined} onChange={(event) => setAuditDateTo(event.target.value)} /></label>
+                  <span className="admin-result-count">{filteredAuditEvents.length} / {auditEvents.length} 筆</span>
                 </div>
-                <p className="admin-panel-footnote">正式版本會記錄帳號建立、角色異動、登入結果、資料更正與永久刪除。</p>
+                {auditError ? <div className="admin-form-error admin-audit-error" role="alert">{auditError}</div> : null}
+                <div className="admin-table-wrap">
+                  <table className="admin-table admin-audit-table">
+                    <thead><tr><th>系統時間</th><th>操作者／角色</th><th>來源 IP</th><th>動作</th><th>操作對象</th><th>結果</th><th><span className="visually-hidden">詳情</span></th></tr></thead>
+                    <tbody>{filteredAuditEvents.map((event) => (
+                      <tr key={event.id}>
+                        <td><time>{formatStoredTimestamp(event.occurredAt, true)}</time>{event.historical ? <small className="admin-legacy-label">舊紀錄</small> : null}</td>
+                        <td><strong>{auditActorLabel(event.actorUsername)}</strong><small className="admin-audit-subtext">{auditRoleLabel(event.actorRole)}</small></td>
+                        <td>{event.sourceIp}</td>
+                        <td><strong>{auditActionLabel(event.action)}</strong></td>
+                        <td>{auditResourceLabel(event)}</td>
+                        <td><span className={`admin-audit-result ${event.result}`}>{event.result === "success" ? "成功" : "失敗"}</span></td>
+                        <td><button type="button" className="admin-row-action" onClick={() => setSelectedAuditEvent(event)}>查看</button></td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+                {!auditLoading && !auditError && filteredAuditEvents.length === 0 ? <div className="admin-empty"><strong>找不到符合條件的操作紀錄</strong><p>請調整關鍵字、日期或篩選條件。</p></div> : null}
+                <p className="admin-panel-footnote">新紀錄包含 IP、系統時間、操作者角色、操作對象與修改前後內容；舊資料無法回填的欄位會標示「歷史未提供」。密碼、密碼雜湊與 Session 憑證不寫入 LOG。</p>
               </section>
             ) : null}
 
@@ -539,7 +720,7 @@ export default function AdminAreaPage() {
                   </section>
                   <section className="admin-panel" aria-labelledby="policy-title">
                     <header className="admin-panel-heading"><div><span className="panel-kicker">SECURITY POLICY</span><h3 id="policy-title">預設登入規則</h3></div></header>
-                    <dl className="admin-policy-list"><div><dt>連續失敗</dt><dd>5 次後鎖定 15 分鐘</dd></div><div><dt>閒置逾時</dt><dd>30 分鐘後重新登入</dd></div><div><dt>ADMIN 帳號</dt><dd>系統至少保留 1 位</dd></div></dl>
+                    <dl className="admin-policy-list"><div><dt>連續失敗</dt><dd>5 次後鎖定 15 分鐘</dd></div><div><dt>登入有效時間</dt><dd>8 小時後重新登入</dd></div><div><dt>ADMIN 帳號</dt><dd>系統至少保留 1 位</dd></div></dl>
                   </section>
                 </div>
                 <section className="admin-panel" aria-labelledby="login-event-title">
@@ -582,6 +763,34 @@ export default function AdminAreaPage() {
               <div className="admin-user-actions"><button type="button" onClick={() => { setResetPasswordOpen((current) => !current); setAccountActionError(""); }} disabled={Boolean(accountAction)}>{resetPasswordOpen ? "取消重設" : "重設密碼"}</button><button type="button" className={selectedUser.status === "disabled" || selectedUser.status === "locked" ? "success" : "danger"} onClick={() => void toggleSelectedUserStatus()} disabled={selectedUser.username === authenticatedUser?.username || Boolean(accountAction)}>{accountAction === "status" ? "處理中…" : selectedUser.status === "disabled" || selectedUser.status === "locked" ? "啟用帳號" : "停用帳號"}</button></div>
               {resetPasswordOpen ? <form className="admin-reset-password-form" onSubmit={resetSelectedUserPassword}><strong>設定新的登入密碼</strong><label><span>新密碼</span><input name="newPassword" type="password" required autoFocus autoComplete="new-password" /></label><label><span>再次輸入新密碼</span><input name="confirmPassword" type="password" required autoComplete="new-password" /></label><small>不限制長度或字元組合；儲存後舊密碼立即失效。</small><button type="submit" className="admin-primary-button" disabled={Boolean(accountAction)}>{accountAction === "password" ? "儲存中…" : "儲存新密碼"}</button></form> : null}
               {accountActionError ? <div className="admin-form-error" role="alert">{accountActionError}</div> : null}
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
+      {selectedAuditEvent ? (
+        <div className="admin-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedAuditEvent(null); }}>
+          <aside className="admin-user-drawer admin-audit-drawer" role="dialog" aria-modal="true" aria-labelledby="audit-detail-title">
+            <header>
+              <div><span className={`admin-event-dot ${selectedAuditEvent.result}`} aria-hidden="true"></span><div><span className="panel-kicker">AUDIT EVENT</span><h3 id="audit-detail-title">{auditActionLabel(selectedAuditEvent.action)}</h3><p>{selectedAuditEvent.id}</p></div></div>
+              <button type="button" onClick={() => setSelectedAuditEvent(null)} aria-label="關閉操作紀錄詳情">×</button>
+            </header>
+            <div className="admin-user-detail-body admin-audit-detail-body">
+              {selectedAuditEvent.historical ? <p className="admin-audit-history-note">此筆來自既有歷史資料；當時未保存的欄位無法回填。</p> : null}
+              <dl>
+                <div><dt>系統時間</dt><dd>{formatStoredTimestamp(selectedAuditEvent.occurredAt, true)}</dd></div>
+                <div><dt>操作者</dt><dd>{auditActorLabel(selectedAuditEvent.actorUsername)}</dd></div>
+                <div><dt>操作者角色</dt><dd>{auditRoleLabel(selectedAuditEvent.actorRole)}</dd></div>
+                <div><dt>來源 IP</dt><dd>{selectedAuditEvent.sourceIp}</dd></div>
+                <div><dt>操作對象</dt><dd>{auditResourceLabel(selectedAuditEvent)}</dd></div>
+                <div><dt>結果</dt><dd><span className={`admin-audit-result ${selectedAuditEvent.result}`}>{selectedAuditEvent.result === "success" ? "成功" : "失敗"}</span></dd></div>
+                <div><dt>原因／備註</dt><dd>{selectedAuditEvent.reason ?? "未提供"}</dd></div>
+                <div><dt>請求識別碼</dt><dd className="admin-audit-code">{selectedAuditEvent.requestId}</dd></div>
+                <div><dt>裝置資訊</dt><dd>{selectedAuditEvent.userAgent ?? (selectedAuditEvent.historical ? "歷史未提供" : "未提供")}</dd></div>
+              </dl>
+              <section className="admin-audit-change" aria-labelledby="audit-before-title"><span id="audit-before-title">修改前</span><pre>{formatAuditSnapshot(selectedAuditEvent.before)}</pre></section>
+              <section className="admin-audit-change after" aria-labelledby="audit-after-title"><span id="audit-after-title">修改後</span><pre>{formatAuditSnapshot(selectedAuditEvent.after)}</pre></section>
+              {selectedAuditEvent.errorCode ? <div className="admin-form-error">錯誤代碼：{selectedAuditEvent.errorCode}</div> : null}
             </div>
           </aside>
         </div>

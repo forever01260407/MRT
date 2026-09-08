@@ -1,3 +1,6 @@
+import { ensureAuditEventsTable, prepareAuditEvent } from "./auditLog";
+import type { AuditContext } from "./auditLog";
+
 export type DeviceAxleProfile = {
   deviceId: string;
   effectiveDate: string;
@@ -10,6 +13,7 @@ export type DeviceAxleProfile = {
 
 export type DeviceAxleProfileInput = Pick<DeviceAxleProfile, "deviceId" | "effectiveDate" | "stageCount" | "axleCount" | "updatedBy"> & {
   sourceIp: string;
+  audit: AuditContext;
 };
 
 export type DeviceAxleProfileEvent = {
@@ -106,6 +110,7 @@ function rowToDeviceAxleProfileEvent(row: StoredDeviceAxleProfileEventRow): Devi
 }
 
 export async function ensureDeviceAxleProfileTable(d1: D1Database) {
+  await ensureAuditEventsTable(d1);
   await d1.prepare(DEVICE_AXLE_PROFILE_TABLE_SQL).run();
   const columns = await d1.prepare("PRAGMA table_info(device_axle_profiles)")
     .all<{ name: string }>();
@@ -166,11 +171,12 @@ export async function upsertDeviceAxleProfile(d1: D1Database, profile: DeviceAxl
       updated_by = excluded.updated_by,
       updated_at = CURRENT_TIMESTAMP`)
     .bind(profile.deviceId, profile.effectiveDate, profile.stageCount, profile.axleCount, profile.updatedBy);
+  const eventId = `AXLE-${crypto.randomUUID().toUpperCase()}`;
   const appendEvent = d1.prepare(`INSERT INTO device_axle_profile_events
     (id, device_id, previous_stage_count, stage_count, previous_axle_count, axle_count, previous_effective_date, effective_date, changed_by, source_ip)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(
-      `AXLE-${crypto.randomUUID().toUpperCase()}`,
+      eventId,
       profile.deviceId,
       existing?.stage_count ?? null,
       profile.stageCount,
@@ -181,7 +187,26 @@ export async function upsertDeviceAxleProfile(d1: D1Database, profile: DeviceAxl
       profile.updatedBy,
       profile.sourceIp,
     );
-  await d1.batch([upsert, appendEvent]);
+  const appendAudit = prepareAuditEvent(d1, {
+    ...profile.audit,
+    action: existing ? "device_axle.updated" : "device_axle.created",
+    resourceType: "device_axle_profile",
+    resourceId: profile.deviceId,
+    resourceLabel: profile.deviceId,
+    before: existing ? {
+      effectiveDate: existing.effective_date,
+      stageCount: existing.stage_count,
+      axleCount: existing.axle_count,
+    } : null,
+    after: {
+      effectiveDate: profile.effectiveDate,
+      stageCount: profile.stageCount,
+      axleCount: profile.axleCount,
+    },
+    originType: "device_axle_profile_event",
+    originId: eventId,
+  });
+  await d1.batch([upsert, appendEvent, appendAudit]);
 
   const stored = await d1.prepare(`SELECT device_id, effective_date, stage_count, axle_count, updated_by, created_at, updated_at
     FROM device_axle_profiles

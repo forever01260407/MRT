@@ -1,6 +1,8 @@
 import { getD1 } from "../../db";
 import { createPasswordCredential, verifyPassword } from "./auth";
 import type { AuthRole, PasswordCredential } from "./auth";
+import { ensureAuditEventsTable, prepareAuditEvent } from "./auditLog";
+import type { AuditContext } from "./auditLog";
 
 type UserStatus = "active" | "pending" | "locked" | "disabled";
 type Database = Awaited<ReturnType<typeof getD1>>;
@@ -10,6 +12,7 @@ export type SignInOutcome = "success" | "invalid_credentials" | "account_not_fou
 export type SignInContext = {
   source: string;
   userAgent?: string;
+  requestId?: string;
 };
 
 export type SignInEvent = {
@@ -190,6 +193,7 @@ export async function ensureUsersTable(database: Database) {
       await database.prepare(SIGN_IN_EVENTS_TABLE_SQL).run();
       await database.prepare(SIGN_IN_EVENTS_USERNAME_INDEX_SQL).run();
       await database.prepare(SIGN_IN_EVENTS_CREATED_AT_INDEX_SQL).run();
+      await ensureAuditEventsTable(database);
       await database.batch(initialAccounts.map((account) => database.prepare(
         `INSERT OR IGNORE INTO users (
           id, name, username, role, status, password_hash, password_salt,
@@ -223,23 +227,42 @@ async function insertSignInEvent(
   database: Database,
   options: {
     userId?: string | null;
+    userRole?: AuthRole | null;
     username: string;
     outcome: SignInOutcome;
     context: SignInContext;
   },
 ) {
-  await database.prepare(
+  const eventId = `AUTH-${crypto.randomUUID().toUpperCase()}`;
+  const normalizedUsername = options.username.trim().toLowerCase().slice(0, 80) || "unknown";
+  await database.batch([database.prepare(
     `INSERT INTO sign_in_events (id, user_id, username, success, outcome, source, user_agent)
     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
-    `AUTH-${crypto.randomUUID().toUpperCase()}`,
+    eventId,
     options.userId ?? null,
-    options.username.trim().toLowerCase().slice(0, 80) || "unknown",
+    normalizedUsername,
     options.outcome === "success" ? 1 : 0,
     options.outcome,
     options.context.source.slice(0, 120) || "未知來源",
     options.context.userAgent?.slice(0, 500) || null,
-  ).run();
+  ), prepareAuditEvent(database, {
+    actorUserId: options.userId ?? null,
+    actorUsername: normalizedUsername,
+    actorRole: options.userRole ?? "anonymous",
+    sourceIp: options.context.source,
+    userAgent: options.context.userAgent,
+    requestId: options.context.requestId ?? crypto.randomUUID(),
+    action: options.outcome === "success" ? "auth.login_success" : "auth.login_failure",
+    resourceType: "authentication",
+    resourceId: options.userId ?? null,
+    resourceLabel: `@${normalizedUsername}`,
+    after: { outcome: options.outcome },
+    result: options.outcome === "success" ? "success" : "failure",
+    errorCode: options.outcome === "success" ? null : options.outcome,
+    originType: "sign_in_event",
+    originId: eventId,
+  })]);
 }
 
 export async function recordSignInEvent(database: Database, options: {
@@ -249,11 +272,12 @@ export async function recordSignInEvent(database: Database, options: {
 }) {
   await ensureUsersTable(database);
   const normalizedUsername = options.username.trim().toLowerCase().slice(0, 80) || "unknown";
-  const user = await database.prepare("SELECT id FROM users WHERE username = ? COLLATE NOCASE LIMIT 1")
+  const user = await database.prepare("SELECT id, role FROM users WHERE username = ? COLLATE NOCASE LIMIT 1")
     .bind(normalizedUsername)
-    .first<{ id: string }>();
+    .first<{ id: string; role: AuthRole }>();
   await insertSignInEvent(database, {
     userId: user?.id,
+    userRole: user?.role,
     username: normalizedUsername,
     outcome: options.outcome,
     context: options.context,
@@ -314,7 +338,7 @@ export async function authenticateStoredUser(
     return null;
   }
   if (row.status === "disabled") {
-    await insertSignInEvent(database, { userId: row.id, username: row.username, outcome: "account_disabled", context });
+    await insertSignInEvent(database, { userId: row.id, userRole: row.role, username: row.username, outcome: "account_disabled", context });
     return null;
   }
   if (row.status === "locked") {
@@ -325,7 +349,7 @@ export async function authenticateStoredUser(
         AND created_at >= datetime('now', '-15 minutes')`,
     ).bind(row.username).first<{ count: number }>();
     if ((activeLock?.count ?? 0) > 0) {
-      await insertSignInEvent(database, { userId: row.id, username: row.username, outcome: "account_locked", context });
+      await insertSignInEvent(database, { userId: row.id, userRole: row.role, username: row.username, outcome: "account_locked", context });
       return null;
     }
     await database.prepare(
@@ -338,7 +362,7 @@ export async function authenticateStoredUser(
     iterations: row.password_iterations,
   });
   if (!passwordMatches) {
-    await insertSignInEvent(database, { userId: row.id, username: row.username, outcome: "invalid_credentials", context });
+    await insertSignInEvent(database, { userId: row.id, userRole: row.role, username: row.username, outcome: "invalid_credentials", context });
     const recentAttempts = await database.prepare(
       `SELECT success, outcome FROM sign_in_events
       WHERE username = ? COLLATE NOCASE
@@ -359,7 +383,7 @@ export async function authenticateStoredUser(
   await database.prepare(
     "UPDATE users SET status = 'active', last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
   ).bind(row.id).run();
-  await insertSignInEvent(database, { userId: row.id, username: row.username, outcome: "success", context });
+  await insertSignInEvent(database, { userId: row.id, userRole: row.role, username: row.username, outcome: "success", context });
   return { username: row.username, name: row.username, role: row.role };
 }
 
@@ -399,6 +423,7 @@ export async function createStoredUser(database: Database, options: {
   role: AuthRole;
   password: string;
   createdBy: string;
+  audit: AuditContext;
 }) {
   await ensureUsersTable(database);
   const normalizedUsername = options.username.trim().toLowerCase();
@@ -410,7 +435,7 @@ export async function createStoredUser(database: Database, options: {
   const credential = await createPasswordCredential(options.password);
   const id = `USR-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
   try {
-    await database.prepare(
+    await database.batch([database.prepare(
       `INSERT INTO users (
         id, name, username, role, status, password_hash, password_salt,
         password_iterations, force_password_change, created_by
@@ -425,7 +450,16 @@ export async function createStoredUser(database: Database, options: {
       credential.iterations,
       0,
       options.createdBy,
-    ).run();
+    ), prepareAuditEvent(database, {
+      ...options.audit,
+      action: "user.created",
+      resourceType: "user",
+      resourceId: id,
+      resourceLabel: `@${normalizedUsername}`,
+      after: { username: normalizedUsername, role: options.role, status: "active" },
+      originType: "user",
+      originId: id,
+    })]);
   } catch (error) {
     if (error instanceof Error && /UNIQUE constraint failed|users_username_uidx/i.test(error.message)) {
       throw new DuplicateUsernameError();
@@ -445,16 +479,25 @@ export async function createStoredUser(database: Database, options: {
 export async function resetStoredUserPassword(database: Database, options: {
   userId: string;
   password: string;
+  audit: AuditContext;
 }) {
   await ensureUsersTable(database);
-  await findUserById(database, options.userId);
+  const row = await findUserById(database, options.userId);
   const credential = await createPasswordCredential(options.password);
-  await database.prepare(
+  await database.batch([database.prepare(
     `UPDATE users
     SET password_hash = ?, password_salt = ?, password_iterations = ?,
       force_password_change = 0, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?`,
-  ).bind(credential.hash, credential.salt, credential.iterations, options.userId).run();
+  ).bind(credential.hash, credential.salt, credential.iterations, options.userId), prepareAuditEvent(database, {
+    ...options.audit,
+    action: "user.password_reset",
+    resourceType: "user",
+    resourceId: row.id,
+    resourceLabel: `@${row.username}`,
+    before: { password: "受保護，不記錄" },
+    after: { password: "已重設（內容不記錄）" },
+  })]);
   return publicUser(await findUserById(database, options.userId));
 }
 
@@ -462,13 +505,23 @@ export async function updateStoredUserStatus(database: Database, options: {
   userId: string;
   status: "active" | "disabled";
   actorUsername: string;
+  audit: AuditContext;
 }) {
   await ensureUsersTable(database);
   const row = await findUserById(database, options.userId);
   await assertAdminCanBeChanged(database, row, row.role, options.status, options.actorUsername);
-  await database.prepare(
+  await database.batch([database.prepare(
     "UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-  ).bind(options.status, options.userId).run();
+  ).bind(options.status, options.userId), prepareAuditEvent(database, {
+    ...options.audit,
+    action: "user.status_changed",
+    resourceType: "user",
+    resourceId: row.id,
+    resourceLabel: `@${row.username}`,
+    before: { status: row.status },
+    after: { status: options.status },
+    reason: options.status === "disabled" ? "管理員停用帳號" : "管理員啟用帳號",
+  })]);
   return publicUser(await findUserById(database, options.userId));
 }
 
@@ -476,12 +529,21 @@ export async function updateStoredUserRole(database: Database, options: {
   userId: string;
   role: AuthRole;
   actorUsername: string;
+  audit: AuditContext;
 }) {
   await ensureUsersTable(database);
   const row = await findUserById(database, options.userId);
   await assertAdminCanBeChanged(database, row, options.role, row.status, options.actorUsername);
-  await database.prepare(
+  await database.batch([database.prepare(
     "UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-  ).bind(options.role, options.userId).run();
+  ).bind(options.role, options.userId), prepareAuditEvent(database, {
+    ...options.audit,
+    action: "user.role_changed",
+    resourceType: "user",
+    resourceId: row.id,
+    resourceLabel: `@${row.username}`,
+    before: { role: row.role },
+    after: { role: options.role },
+  })]);
   return publicUser(await findUserById(database, options.userId));
 }

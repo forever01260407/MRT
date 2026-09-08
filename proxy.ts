@@ -90,8 +90,8 @@ export async function proxy(request: NextRequest) {
       return NextResponse.json({ error: "只有 POWER USER 或 ADMIN 可以刪除紀錄。" }, { status: 403 });
     }
 
-    if (pathname === "/api/lubrication" && request.method === "PUT" && effectiveSession.role !== "admin") {
-      return NextResponse.json({ error: "只有 ADMIN 可以從垃圾桶還原紀錄。" }, { status: 403 });
+    if (pathname === "/api/lubrication" && request.method === "PUT" && effectiveSession.role === "user") {
+      return NextResponse.json({ error: "只有 POWER USER 或 ADMIN 可以從垃圾桶還原紀錄。" }, { status: 403 });
     }
 
     const requestHeaders = new Headers(request.headers);

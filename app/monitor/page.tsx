@@ -234,7 +234,7 @@ export default function MonitorPage() {
   const correctedCount = records.filter((item) => item.revisions.length > 0).length;
   const revisionCount = records.reduce((sum, item) => sum + item.revisions.length, 0);
   const canDelete = signedInUser?.role === "supervisor" || signedInUser?.role === "admin";
-  const canRestore = signedInUser?.role === "admin";
+  const canRestore = signedInUser?.role === "supervisor" || signedInUser?.role === "admin";
 
   const openCorrection = (item: MonitoredLubricationRecord) => {
     setEditing(item);
@@ -445,13 +445,13 @@ export default function MonitorPage() {
 
         <section className="monitor-safety-note" aria-label="資料安全說明">
           <span aria-hidden="true">◎</span>
-          <div><strong>異動會保留原始資料</strong><p>更正會新增版本；刪除只會從總覽與計算中隱藏，仍可由 POWER USER 或 ADMIN 查看，並由 ADMIN 還原。</p></div>
+          <div><strong>異動會保留原始資料</strong><p>更正會新增版本；刪除只會從總覽與計算中隱藏，仍可由 POWER USER 或 ADMIN 查看及還原。</p></div>
         </section>
 
         <section className="monitor-summary-grid" aria-label="紀錄摘要">
           <article><span>有效紀錄</span><strong>{loading ? "—" : records.length}</strong><small>總覽與計算中使用</small></article>
           <article><span>已更正紀錄</span><strong>{loading ? "—" : correctedCount}</strong><small>共 {revisionCount} 個更正版本</small></article>
-          <article><span>垃圾桶失效紀錄</span><strong>{loading ? "—" : deletedRecords.length}</strong><small>保留於 D1，僅 ADMIN 可還原</small></article>
+          <article><span>垃圾桶失效紀錄</span><strong>{loading ? "—" : deletedRecords.length}</strong><small>保留於 D1，可由 POWER USER 或 ADMIN 還原</small></article>
           <article><span>設備設定異動</span><strong>{axleLogsLoading ? "—" : axleChangeLogs.length}</strong><small>階數、軸數與生效日</small></article>
         </section>
 
@@ -558,10 +558,10 @@ export default function MonitorPage() {
                         <td>@{displayActor(item.deletion?.deletedBy ?? "未知")}</td>
                         <td>{item.deletion ? formatDateTime(item.deletion.deletedAt) : "—"}</td>
                         <td>{item.deletion?.deletedIp ?? "—"}</td>
-                        <td><div className="monitor-row-actions"><button type="button" onClick={() => setExpandedId(expanded ? null : item.id)} aria-expanded={expanded}>{expanded ? "收起" : "查看歷程"}</button>{canRestore ? <button type="button" className="restore" onClick={() => openRestore(item)}>還原</button> : <span className="monitor-admin-only">僅 ADMIN 可還原</span>}</div></td>
+                        <td><div className="monitor-row-actions"><button type="button" onClick={() => setExpandedId(expanded ? null : item.id)} aria-expanded={expanded}>{expanded ? "收起" : "查看歷程"}</button>{canRestore ? <button type="button" className="restore" onClick={() => openRestore(item)}>還原</button> : <span className="monitor-admin-only">目前角色不可還原</span>}</div></td>
                       </tr>,
                       expanded ? <tr className="monitor-history-row" key={`${item.id}:deleted-history`}><td colSpan={10}>
-                        <div className="monitor-history-heading"><div><strong>{item.current.deviceId} 完整歷程</strong><span>原始紀錄 ID：{item.id}</span></div>{canRestore ? <button type="button" onClick={() => openRestore(item)}>↺ 還原這筆紀錄</button> : <span className="monitor-admin-only">此紀錄已失效，僅 ADMIN 可還原</span>}</div>
+                        <div className="monitor-history-heading"><div><strong>{item.current.deviceId} 完整歷程</strong><span>原始紀錄 ID：{item.id}</span></div>{canRestore ? <button type="button" onClick={() => openRestore(item)}>↺ 還原這筆紀錄</button> : <span className="monitor-admin-only">此紀錄已失效，目前角色不可還原</span>}</div>
                         <RecordTimeline item={item} />
                       </td></tr> : null,
                     ];
@@ -602,11 +602,11 @@ export default function MonitorPage() {
 
       {deletingRecord ? <div className="manual-entry-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDelete(); }}>
         <section className="manual-entry-modal monitor-delete-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description">
-          <header className="manual-entry-modal-header"><div><span className="panel-kicker">MOVE TO TRASH</span><h3 id="delete-title" className="monitor-delete-title"><span aria-hidden="true">×</span>{awaitingFinalDeleteConfirmation ? "確定移至垃圾桶？" : "刪除紀錄"}</h3><p id="delete-description">{awaitingFinalDeleteConfirmation ? "刪除後會標註失效，並從總覽、圖表與統計中排除；只有 ADMIN 可以還原。" : "資料不會從 D1 抹除，系統會保留完整內容與操作歷程。"}</p></div><button type="button" className="manual-entry-close" onClick={closeDelete} disabled={deleting} aria-label="關閉刪除視窗">×</button></header>
+          <header className="manual-entry-modal-header"><div><span className="panel-kicker">MOVE TO TRASH</span><h3 id="delete-title" className="monitor-delete-title"><span aria-hidden="true">×</span>{awaitingFinalDeleteConfirmation ? "確定移至垃圾桶？" : "刪除紀錄"}</h3><p id="delete-description">{awaitingFinalDeleteConfirmation ? "刪除後會標註失效，並從總覽、圖表與統計中排除；POWER USER 或 ADMIN 可以還原。" : "資料不會從 D1 抹除，系統會保留完整內容與操作歷程。"}</p></div><button type="button" className="manual-entry-close" onClick={closeDelete} disabled={deleting} aria-label="關閉刪除視窗">×</button></header>
           <form className="manual-entry-form" onSubmit={awaitingFinalDeleteConfirmation ? submitDelete : requestFinalDeleteConfirmation}>
             <div className="monitor-delete-warning"><span>即將刪除</span><strong>{recordSummary(deletingRecord.current)}</strong><p>現場人員：{deletingRecord.current.inspector}｜來源：{deletingRecord.sourceType}</p></div>
             <label className="manual-entry-field"><span>刪除原因 <b>*</b></span><input value={deleteReason} onChange={(event) => setDeleteReason(event.target.value)} disabled={deleting || awaitingFinalDeleteConfirmation} placeholder="例如：量測值誤植或重複資料" maxLength={500} required /></label>
-            {awaitingFinalDeleteConfirmation ? <div className="monitor-delete-final-note" role="alert"><strong>請再次確認上方資料。</strong><span>系統會記錄刪除者、伺服器時間、IP 與原因，並將資料放入垃圾桶。</span></div> : <div className="monitor-delete-final-note"><strong>將以 {signedInUser?.name || signedInUser?.username || "目前登入者"} 的身分執行。</strong><span>POWER USER 與 ADMIN 可刪除；只有 ADMIN 可從垃圾桶還原。</span></div>}
+            {awaitingFinalDeleteConfirmation ? <div className="monitor-delete-final-note" role="alert"><strong>請再次確認上方資料。</strong><span>系統會記錄刪除者、伺服器時間、IP 與原因，並將資料放入垃圾桶。</span></div> : <div className="monitor-delete-final-note"><strong>將以 {signedInUser?.name || signedInUser?.username || "目前登入者"} 的身分執行。</strong><span>POWER USER 與 ADMIN 均可刪除及從垃圾桶還原。</span></div>}
             {deleteError ? <div className="manual-entry-error" role="alert">{deleteError}</div> : null}
             <footer className="manual-entry-form-actions"><button type="button" className="manual-entry-cancel" onClick={awaitingFinalDeleteConfirmation ? () => { setAwaitingFinalDeleteConfirmation(false); setDeleteError(""); } : closeDelete} disabled={deleting}>{awaitingFinalDeleteConfirmation ? "返回檢查" : "取消"}</button><button type="submit" className="monitor-delete-confirm" disabled={deleting}>{deleting ? "正在刪除…" : awaitingFinalDeleteConfirmation ? "確定移至垃圾桶" : "繼續刪除"}</button></footer>
           </form>
@@ -615,7 +615,7 @@ export default function MonitorPage() {
 
       {restoringRecord ? <div className="manual-entry-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeRestore(); }}>
         <section className="manual-entry-modal monitor-restore-modal" role="dialog" aria-modal="true" aria-labelledby="restore-title" aria-describedby="restore-description">
-          <header className="manual-entry-modal-header"><div><span className="panel-kicker">RESTORE RECORD</span><h3 id="restore-title" className="monitor-restore-title"><span aria-hidden="true">↺</span>ADMIN 還原紀錄</h3><p id="restore-description">只有 ADMIN 可以執行。還原後會重新納入量測紀錄、總覽、圖表與統計，垃圾桶歷程仍會保留。</p></div><button type="button" className="manual-entry-close" onClick={closeRestore} disabled={restoring} aria-label="關閉還原視窗">×</button></header>
+          <header className="manual-entry-modal-header"><div><span className="panel-kicker">RESTORE RECORD</span><h3 id="restore-title" className="monitor-restore-title"><span aria-hidden="true">↺</span>還原紀錄</h3><p id="restore-description">POWER USER 或 ADMIN 可以執行。還原後會重新納入量測紀錄、總覽、圖表與統計，垃圾桶歷程仍會保留。</p></div><button type="button" className="manual-entry-close" onClick={closeRestore} disabled={restoring} aria-label="關閉還原視窗">×</button></header>
           <form className="manual-entry-form" onSubmit={submitRestore}>
             <div className="monitor-restore-summary"><span>將還原</span><strong>{recordSummary(restoringRecord.current)}</strong><p>原刪除者：@{displayActor(restoringRecord.deletion?.deletedBy ?? "未知")}｜時間：{restoringRecord.deletion ? formatDateTime(restoringRecord.deletion.deletedAt) : "—"}</p></div>
             <label className="manual-entry-field"><span>還原原因 <b>*</b></span><input value={restoreReason} onChange={(event) => setRestoreReason(event.target.value)} disabled={restoring} placeholder="例如：確認原紀錄正確" maxLength={500} required /></label>

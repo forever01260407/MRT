@@ -225,7 +225,7 @@ test("securely creates and overwrites one axle profile per lubrication device", 
   assert.match(profileStore, /updated_by = excluded\.updated_by/);
   assert.match(profileStore, /INSERT INTO device_axle_profile_events/);
   assert.match(profileStore, /existing\?\.axle_count \?\? null/);
-  assert.match(profileStore, /await d1\.batch\(\[upsert, appendEvent\]\)/);
+  assert.match(profileStore, /await d1\.batch\(\[upsert, appendEvent, appendAudit\]\)/);
   assert.match(actorMigration, /ADD `updated_by` text DEFAULT 'system' NOT NULL/);
 
   const sqlStart = profileStore.indexOf("`INSERT INTO device_axle_profiles");
@@ -275,7 +275,7 @@ test("server-renders the operational admin area framework", async () => {
 
   assert.match(html, /管理總覽/);
   assert.match(html, /帳號安全提醒/);
-  assert.match(html, /最近管理操作/);
+  assert.match(html, /最近系統操作/);
   assert.match(html, /新增帳號/);
   assert.match(page, /<AdminNavItem active \/>/);
   assert.match(authChrome, /user\?\.role !== "admin"/);
@@ -284,8 +284,11 @@ test("server-renders the operational admin area framework", async () => {
   assert.match(page, /角色與權限/);
   assert.match(page, /操作紀錄/);
   assert.match(page, /登入與安全/);
+  assert.match(page, /登入有效時間/);
+  assert.match(page, /8 小時後重新登入/);
   assert.match(page, /AD USER（未啟用）/);
   assert.match(page, /功能權限矩陣/);
+  assert.match(page, /label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true/);
   assert.match(rolePresentation, /user: "USER"/);
   assert.match(rolePresentation, /userpro: "AD USER"/);
   assert.match(rolePresentation, /supervisor: "POWER USER"/);
@@ -299,9 +302,8 @@ test("server-renders the operational admin area framework", async () => {
   assert.match(styles, /\.role-display-badge\.admin \{[^}]*#c62845/);
   assert.doesNotMatch(page, /首次登入時要求更換密碼|強制更換暫時密碼|forcePasswordChange/);
   assert.match(page, /登入帳號／顯示名稱/);
-  assert.match(page, /建立時間/);
-  assert.match(page, /formatStoredTimestamp\(user\.createdAtRaw, true\)/);
-  assert.match(page, /user\.createdBy === "system"/);
+  assert.match(page, /完整操作事件/);
+  assert.match(page, /系統時間/);
   assert.match(page, /placeholder="由 ADMIN 自行設定"/);
   assert.doesNotMatch(page, /minLength=|至少 8 個字元/);
 });
@@ -373,6 +375,86 @@ test("persists password resets, role changes, and account disabling without expo
   assert.doesNotMatch(page, /強制登出/);
 });
 
+test("records and displays a unified audit trail with IP and before-after details", async () => {
+  const auditStore = await readFile(new URL("../app/lib/auditLog.ts", import.meta.url), "utf8");
+  const auditRoute = await readFile(new URL("../app/api/admin/audit/route.ts", import.meta.url), "utf8");
+  const adminRoute = await readFile(new URL("../app/api/admin/users/route.ts", import.meta.url), "utf8");
+  const userStore = await readFile(new URL("../app/lib/userStore.ts", import.meta.url), "utf8");
+  const lubricationRoute = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
+  const axleStore = await readFile(new URL("../app/lib/deviceAxleProfile.ts", import.meta.url), "utf8");
+  const loginRoute = await readFile(new URL("../app/api/auth/login/route.ts", import.meta.url), "utf8");
+  const logoutRoute = await readFile(new URL("../app/api/auth/logout/route.ts", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/admin-area/page.tsx", import.meta.url), "utf8");
+  const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
+  const userMigration = await readFile(new URL("../drizzle/0003_marvelous_maverick.sql", import.meta.url), "utf8");
+  const auditMigration = await readFile(new URL("../drizzle/0008_lying_slayback.sql", import.meta.url), "utf8");
+
+  assert.match(schema, /sqliteTable\("audit_events"/);
+  assert.match(auditMigration, /`source_ip` text NOT NULL/);
+  assert.match(auditMigration, /`before_json` text/);
+  assert.match(auditMigration, /`after_json` text/);
+  assert.match(auditMigration, /CREATE INDEX `idx_audit_events_action_occurred_at`/);
+  assert.match(auditStore, /listUnifiedAuditEvents/);
+  assert.match(auditStore, /歷史未提供/);
+  assert.match(auditRoute, /actor\.role !== "admin"/);
+  assert.match(adminRoute, /getAdminAuditContext/);
+  assert.match(userStore, /action: "user\.role_changed"/);
+  assert.match(userStore, /action: "user\.status_changed"/);
+  assert.match(userStore, /action: "user\.password_reset"/);
+  assert.doesNotMatch(userStore, /after: \{ password: options\.password/);
+  assert.match(lubricationRoute, /action: "lubrication\.measurement_corrected"/);
+  assert.match(lubricationRoute, /action: "lubrication\.measurement_soft_deleted"/);
+  assert.match(lubricationRoute, /action: "lubrication\.measurement_restored"/);
+  assert.match(axleStore, /action: existing \? "device_axle\.updated" : "device_axle\.created"/);
+  assert.match(loginRoute, /getRequestAuditContext/);
+  assert.match(logoutRoute, /action: "auth\.logout"/);
+  assert.match(page, /帳號、IP、動作或操作對象/);
+  assert.match(page, /修改前/);
+  assert.match(page, /修改後/);
+  assert.match(page, /密碼、密碼雜湊與 Session 憑證不寫入 LOG/);
+
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec(userMigration.replaceAll("--> statement-breakpoint", ""));
+    database.exec(auditMigration.replaceAll("--> statement-breakpoint", ""));
+    database.prepare(
+      `INSERT INTO users (id, name, username, role, status, password_hash, password_salt, password_iterations, force_password_change, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("USR-AUDIT", "admin", "admin", "admin", "active", "secret-hash", "secret-salt", 120000, 0, "system");
+    database.prepare(
+      `INSERT INTO audit_events (id, occurred_at, actor_user_id, actor_username, actor_role, source_ip, request_id,
+        action, resource_type, resource_id, before_json, after_json, result)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "AUDIT-1",
+      "2026-09-09T01:02:03.000Z",
+      "USR-AUDIT",
+      "admin",
+      "admin",
+      "203.0.113.10",
+      "REQ-1",
+      "user.role_changed",
+      "user",
+      "USR-TARGET",
+      JSON.stringify({ role: "user" }),
+      JSON.stringify({ role: "supervisor" }),
+      "success",
+    );
+    const stored = database.prepare("SELECT actor_username, actor_role, source_ip, action, before_json, after_json, result FROM audit_events WHERE id = ?").get("AUDIT-1");
+    assert.deepEqual({ ...stored }, {
+      actor_username: "admin",
+      actor_role: "admin",
+      source_ip: "203.0.113.10",
+      action: "user.role_changed",
+      before_json: '{"role":"user"}',
+      after_json: '{"role":"supervisor"}',
+      result: "success",
+    });
+  } finally {
+    database.close();
+  }
+});
+
 test("server-renders Cloudflare-synchronized current tread and side-wear estimates", async () => {
   const response = await render("/wear");
   assert.equal(response.status, 200);
@@ -426,7 +508,7 @@ test("returns the current Cloudflare time as uncached UTC with Taipei metadata",
   assert.ok(Number.isFinite(Date.parse(payload.now)));
 });
 
-test("lets supervisors and admins move records to Trash while only admins can restore them", async () => {
+test("lets POWER USER and ADMIN move records to Trash and restore them", async () => {
   const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
   const page = await readFile(new URL("../app/monitor/page.tsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
@@ -443,15 +525,15 @@ test("lets supervisors and admins move records to Trash while only admins can re
   assert.match(deleteHandler, /SET deleted_at = \?, deleted_by = \?, deleted_ip = \?, delete_reason = \?/);
   assert.match(deleteHandler, /INSERT INTO measurement_lifecycle_events/);
   assert.doesNotMatch(deleteHandler, /DELETE FROM measurements/);
-  assert.match(restoreHandler, /actor\.role !== "admin"/);
-  assert.match(restoreHandler, /只有 ADMIN 可以從垃圾桶還原紀錄/);
+  assert.match(restoreHandler, /actor\.role === "user"/);
+  assert.match(restoreHandler, /只有 POWER USER 或 ADMIN 可以從垃圾桶還原紀錄/);
   assert.match(restoreHandler, /SET deleted_at = NULL, deleted_by = NULL, deleted_ip = NULL, delete_reason = NULL/);
   assert.match(restoreHandler, /'restored'/);
   assert.match(page, /method: "DELETE"/);
   assert.match(page, /method: "PUT"/);
   assert.match(page, /🗑 垃圾桶（已刪除）/);
   assert.match(page, /const canDelete = signedInUser\?\.role === "supervisor" \|\| signedInUser\?\.role === "admin"/);
-  assert.match(page, /const canRestore = signedInUser\?\.role === "admin"/);
+  assert.match(page, /const canRestore = signedInUser\?\.role === "supervisor" \|\| signedInUser\?\.role === "admin"/);
   assert.match(page, /已標註失效，並從總覽、圖表與統計中排除/);
   assert.doesNotMatch(page, /刪除密碼|deletePassword/);
   assert.match(page, /刪除原因/);
@@ -467,16 +549,16 @@ test("lets supervisors and admins move records to Trash while only admins can re
   assert.match(migration, /ALTER TABLE `device_axle_profile_events` ADD `source_ip`/);
   assert.match(proxy, /pathname === "\/api\/lubrication" && request\.method === "DELETE"/);
   assert.match(proxy, /pathname === "\/api\/lubrication" && request\.method === "PUT"/);
-  assert.match(proxy, /request\.method === "PUT" && effectiveSession\.role !== "admin"/);
+  assert.match(proxy, /request\.method === "PUT" && effectiveSession\.role === "user"/);
 
   const worker = await loadWorker();
-  const supervisorCookie = await login(worker, "supervisor", "supervisor");
-  const supervisorRestoreResponse = await dispatch(worker, "/api/lubrication", {
+  const userCookie = await login(worker, "user", "user");
+  const userRestoreResponse = await dispatch(worker, "/api/lubrication", {
     method: "PUT",
-    headers: { "content-type": "application/json", cookie: supervisorCookie },
+    headers: { "content-type": "application/json", cookie: userCookie },
     body: JSON.stringify({ measurementId: "MEASUREMENT-TEST", restoreReason: "權限測試" }),
   });
-  assert.equal(supervisorRestoreResponse.status, 403);
+  assert.equal(userRestoreResponse.status, 403);
 });
 
 test("adds soft-delete audit storage without losing existing measurement rows", async () => {

@@ -10,12 +10,14 @@ import {
   validateDevelopmentCredentials,
 } from "../../../lib/auth";
 import { authenticateStoredUser, recordSignInEvent } from "../../../lib/userStore";
+import { getRequestAuditContext } from "../../../lib/requestContext";
 
 function getSignInContext(request: Request) {
-  const forwardedAddress = request.headers.get("X-Forwarded-For")?.split(",", 1)[0]?.trim();
+  const auditContext = getRequestAuditContext(request);
   return {
-    source: request.headers.get("CF-Connecting-IP")?.trim() || forwardedAddress || "本機",
-    userAgent: request.headers.get("User-Agent")?.trim(),
+    source: auditContext.sourceIp,
+    userAgent: auditContext.userAgent ?? undefined,
+    requestId: auditContext.requestId,
   };
 }
 

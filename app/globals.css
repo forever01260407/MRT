@@ -1890,6 +1890,7 @@ button:focus-visible {
 .admin-event-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--unknown); }
 .admin-event-dot.success { background: var(--success); }
 .admin-event-dot.pending { background: var(--warning); }
+.admin-event-dot.failure { background: var(--danger); }
 .admin-recent-list > div > div { min-width: 0; display: grid; gap: 2px; }
 .admin-recent-list strong { font-size: 10px; }
 .admin-recent-list p { overflow: hidden; margin: 0; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1949,8 +1950,20 @@ button:focus-visible {
 .permission-no { color: #c4cad3; font-size: 13px; }
 .admin-panel-footnote { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 8px; line-height: 1.5; }
 .admin-panel-footnote strong { color: var(--ink-soft); }
-.admin-audit-table td:nth-child(4) { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+.admin-audit-panel { padding: 18px 0 0; overflow: hidden; }
+.admin-audit-panel > .admin-panel-heading, .admin-audit-panel > .admin-panel-footnote { margin-left: 19px; margin-right: 19px; }
+.admin-audit-toolbar { padding: 13px 19px; display: grid; grid-template-columns: minmax(210px, 1.5fr) repeat(3, minmax(125px, .7fr)) repeat(2, minmax(130px, .7fr)) auto; align-items: end; gap: 8px; border-block: 1px solid var(--line); background: #fafbfc; }
+.admin-audit-toolbar label { min-width: 0; display: grid; gap: 4px; }
+.admin-audit-toolbar label > span { color: var(--muted); font-size: 8px; font-weight: 900; }
+.admin-audit-toolbar input, .admin-audit-toolbar select { width: 100%; min-height: 36px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font: inherit; font-size: 9px; outline: none; }
+.admin-audit-toolbar input:focus, .admin-audit-toolbar select:focus { border-color: var(--violet); box-shadow: 0 0 0 3px rgba(98, 85, 223, .11); }
+.admin-audit-error { margin: 12px 19px 0; }
+.admin-audit-table td:nth-child(5) { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.admin-audit-table td > time, .admin-audit-table td:nth-child(2) { display: grid; gap: 3px; }
+.admin-audit-subtext, .admin-legacy-label { color: var(--muted); font-size: 7px; font-weight: 700; }
+.admin-legacy-label { color: #8a5d00; }
 .admin-audit-result.success { color: #087b59; background: var(--success-soft); }
+.admin-audit-result.failure { color: #b32643; background: var(--danger-soft); }
 .admin-audit-result.neutral { color: #687487; background: var(--unknown-soft); }
 .admin-security-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .admin-security-grid article { min-height: 95px; padding: 15px 17px; display: grid; align-content: center; gap: 3px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
@@ -2000,6 +2013,7 @@ button:focus-visible {
 .admin-local-note { color: #687487; background: var(--unknown-soft); }
 .admin-modal footer { grid-column: 1 / -1; padding-top: 3px; display: flex; justify-content: flex-end; gap: 8px; }
 .admin-user-drawer { width: min(440px, calc(100vw - 18px)); height: 100%; margin-left: auto; overflow-y: auto; border-radius: 17px 0 0 17px; background: #fff; box-shadow: -20px 0 60px rgba(12, 16, 44, .22); }
+.admin-audit-drawer { width: min(590px, calc(100vw - 18px)); }
 .admin-modal-backdrop:has(.admin-user-drawer) { padding: 0; align-items: stretch; justify-content: flex-end; }
 .admin-user-drawer > header > div { display: flex; align-items: center; gap: 11px; }
 .admin-user-detail-body { padding: 18px 20px; display: grid; gap: 18px; }
@@ -2008,6 +2022,13 @@ button:focus-visible {
 .admin-user-detail-body dl div:first-child { border-top: 0; }
 .admin-user-detail-body dt { color: var(--muted); font-size: 9px; font-weight: 850; }
 .admin-user-detail-body dd { margin: 0; color: var(--ink); font-size: 10px; font-weight: 800; }
+.admin-audit-detail-body dd { max-width: 330px; overflow-wrap: anywhere; text-align: right; }
+.admin-audit-history-note { margin: 0; padding: 10px 11px; border: 1px solid #f2d596; border-radius: 9px; color: #805900; background: #fff8e8; font-size: 9px; line-height: 1.55; }
+.admin-audit-code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 8px !important; }
+.admin-audit-change { display: grid; gap: 6px; }
+.admin-audit-change > span { color: #8a5d00; font-size: 9px; font-weight: 900; }
+.admin-audit-change.after > span { color: #087b59; }
+.admin-audit-change pre { max-height: 260px; margin: 0; padding: 13px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; color: var(--ink-soft); background: #f7f8fa; font: 8px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .admin-user-detail-body > label { display: grid; gap: 5px; }
 .admin-user-detail-body > label small { color: var(--muted); font-size: 8px; }
 .admin-user-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -2024,6 +2045,11 @@ button:focus-visible {
 .admin-reset-password-form input:focus { border-color: var(--violet); box-shadow: 0 0 0 3px rgba(98, 85, 223, .11); }
 .admin-reset-password-form small { color: var(--muted); font-size: 8px; line-height: 1.5; }
 .admin-reset-password-form .admin-primary-button { justify-self: end; }
+
+@media (max-width: 1400px) {
+  .admin-audit-toolbar { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .admin-audit-toolbar .admin-search { grid-column: span 2; }
+}
 
 @media (max-width: 1180px) {
   .admin-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2050,6 +2076,7 @@ button:focus-visible {
   .admin-health-strip { grid-template-columns: 1fr; }
   .admin-health-strip > button { grid-column: auto; }
   .admin-toolbar { grid-template-columns: 1fr 1fr; }
+  .admin-audit-toolbar { grid-template-columns: 1fr 1fr; }
   .admin-search { grid-column: 1 / -1; }
   .admin-result-count { justify-self: end; }
   .admin-login-events > div { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 9px 0; }
@@ -2062,6 +2089,8 @@ button:focus-visible {
 @media (max-width: 480px) {
   .admin-console-content { padding-left: 12px; padding-right: 12px; }
   .admin-toolbar { grid-template-columns: 1fr; }
+  .admin-audit-toolbar { grid-template-columns: 1fr; }
+  .admin-audit-toolbar .admin-search { grid-column: 1; }
   .admin-search, .admin-result-count { grid-column: 1; }
   .admin-result-count { justify-self: start; }
   .admin-attention-list > button { grid-template-columns: auto 1fr auto; }
