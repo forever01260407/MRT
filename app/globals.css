@@ -1978,7 +1978,7 @@ button:focus-visible {
 .admin-empty { padding: 36px; display: grid; justify-items: center; gap: 4px; color: var(--muted); text-align: center; }
 .admin-empty strong { color: var(--ink); font-size: 11px; }
 .admin-empty p { margin: 0; font-size: 9px; }
-.admin-role-overview { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 11px; }
+.admin-role-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; }
 .admin-role-overview article { padding: 13px; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
 .admin-role-overview article > span { width: 34px; height: 34px; grid-row: span 2; display: grid; place-items: center; border-radius: 9px; color: #fff; background: #667085; font-size: 9px; font-weight: 950; }
 .admin-role-overview article.supervisor > span { background: #c2410c; }

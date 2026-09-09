@@ -95,21 +95,20 @@ const statusLabels: Record<UserStatus, string> = {
 };
 
 const permissions = [
-  { label: "查看監測總覽", group: "監測", user: true, userpro: true, supervisor: true, admin: true, root: true },
-  { label: "查看完整資料紀錄", group: "監測", user: false, userpro: true, supervisor: true, admin: true, root: true },
-  { label: "登記現場量測", group: "資料", user: true, userpro: true, supervisor: true, admin: true, root: true },
-  { label: "修改自己 30 分鐘內的提交", group: "資料", user: true, userpro: true, supervisor: true, admin: true, root: true },
-  { label: "匯入 Excel 資料", group: "資料", user: false, userpro: true, supervisor: true, admin: true, root: true },
-  { label: "更正任意量測紀錄", group: "資料", user: false, userpro: true, supervisor: true, admin: true, root: true },
-  { label: "設定設備階軸", group: "設備", user: false, userpro: false, supervisor: true, admin: true, root: true },
-  { label: "軟刪除紀錄", group: "高風險", user: false, userpro: true, supervisor: true, admin: true, root: true },
-  { label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true, root: true },
-  { label: "管理一般人員與角色", group: "管理", user: false, userpro: false, supervisor: false, admin: true, root: true },
-  { label: "管理 ADMIN 帳號", group: "管理", user: false, userpro: false, supervisor: false, admin: false, root: true },
-  { label: "查看完整操作紀錄", group: "管理", user: false, userpro: false, supervisor: false, admin: true, root: true },
+  { label: "查看監測總覽", group: "監測", user: true, userpro: true, supervisor: true, admin: true },
+  { label: "查看完整資料紀錄", group: "監測", user: false, userpro: true, supervisor: true, admin: true },
+  { label: "登記現場量測", group: "資料", user: true, userpro: true, supervisor: true, admin: true },
+  { label: "修改自己 30 分鐘內的提交", group: "資料", user: true, userpro: true, supervisor: true, admin: true },
+  { label: "匯入 Excel 資料", group: "資料", user: false, userpro: true, supervisor: true, admin: true },
+  { label: "更正任意量測紀錄", group: "資料", user: false, userpro: true, supervisor: true, admin: true },
+  { label: "設定設備階軸", group: "設備", user: false, userpro: false, supervisor: true, admin: true },
+  { label: "軟刪除紀錄", group: "高風險", user: false, userpro: true, supervisor: true, admin: true },
+  { label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true },
+  { label: "管理一般人員與角色", group: "管理", user: false, userpro: false, supervisor: false, admin: true },
+  { label: "查看完整操作紀錄", group: "管理", user: false, userpro: false, supervisor: false, admin: true },
 ] as const;
 
-const permissionRoles = ["user", "userpro", "supervisor", "admin", "root"] as const;
+const permissionRoles = ["user", "userpro", "supervisor", "admin"] as const;
 
 const signInOutcomeLabels: Record<SignInOutcome, string> = {
   success: "登入成功",
@@ -348,7 +347,6 @@ export default function AdminAreaPage() {
   const userproCount = users.filter((user) => user.role === "userpro" && user.status !== "disabled").length;
   const supervisorCount = users.filter((user) => user.role === "supervisor" && user.status !== "disabled").length;
   const adminCount = users.filter((user) => user.role === "admin" && user.status !== "disabled").length;
-  const rootCount = users.filter((user) => user.role === "root").length;
   const activeSessions = users.reduce((sum, user) => sum + user.sessions, 0);
   const selectedUser = users.find((user) => user.id === selectedUserId) ?? null;
   const authenticatedIsRoot = authenticatedUser?.role === "root";
@@ -669,17 +667,16 @@ export default function AdminAreaPage() {
                   <article className="userpro"><span>AD</span><div><strong className="role-display-badge userpro">AD USER</strong><small>匯入、更正與軟刪除</small></div><b>{userproCount} 人</b></article>
                   <article className="supervisor"><span>P</span><div><strong className="role-display-badge supervisor">POWER USER</strong><small>進階資料操作</small></div><b>{supervisorCount} 人</b></article>
                   <article className="admin"><span>A</span><div><strong className="role-display-badge admin">ADMIN</strong><small>系統與帳號管理</small></div><b>{adminCount} 人</b></article>
-                  <article className="root"><span>R</span><div><strong className="role-display-badge root">ROOT</strong><small>唯一網站擁有者</small></div><b>{rootCount} 人</b></article>
                 </section>
                 <section className="admin-panel" aria-labelledby="permission-title">
-                  <header className="admin-panel-heading"><div><span className="panel-kicker">PERMISSION MATRIX</span><h3 id="permission-title">功能權限矩陣</h3></div><span className="admin-readonly-badge">ROOT 系統固定</span></header>
+                  <header className="admin-panel-heading"><div><span className="panel-kicker">PERMISSION MATRIX</span><h3 id="permission-title">功能權限矩陣</h3></div></header>
                   <div className="admin-table-wrap">
                     <table className="admin-table permission-table">
                       <thead><tr><th>功能</th><th>分類</th>{permissionRoles.map((role) => <th key={role}><span className={`role-display-badge ${role}`}>{getRoleDisplayLabel(role)}</span></th>)}</tr></thead>
                       <tbody>{permissions.map((permission) => <tr key={permission.label}><td><strong>{permission.label}</strong></td><td><span className="admin-permission-group">{permission.group}</span></td>{permissionRoles.map((role) => <td key={role}><span className={permission[role] ? "permission-yes" : "permission-no"}>{permission[role] ? "✓" : "—"}</span></td>)}</tr>)}</tbody>
                     </table>
                   </div>
-                  <p className="admin-panel-footnote"><strong>USER</strong> 只能在「我的近期提交」修改本人 30 分鐘內的現場紀錄；逾時須由 AD USER 以上角色更正。<strong> ROOT</strong> 為唯一系統保留帳號，不能由介面建立、停用或降級；ADMIN 彼此不能變更角色或狀態。</p>
+                  <p className="admin-panel-footnote"><strong>USER</strong> 只能在「我的近期提交」修改本人 30 分鐘內的現場紀錄；逾時須由 AD USER 以上角色更正。ADMIN 彼此不能變更角色或狀態。</p>
                 </section>
               </div>
             ) : null}

@@ -310,11 +310,11 @@ test("server-renders the operational admin area framework", async () => {
   assert.match(page, /8 小時後重新登入/);
   assert.match(page, /AD USER－匯入、更正與軟刪除/);
   assert.match(page, /功能權限矩陣/);
-  assert.match(page, /label: "查看完整資料紀錄", group: "監測", user: false, userpro: true, supervisor: true, admin: true, root: true/);
-  assert.match(page, /label: "修改自己 30 分鐘內的提交", group: "資料", user: true, userpro: true, supervisor: true, admin: true, root: true/);
-  assert.match(page, /label: "軟刪除紀錄", group: "高風險", user: false, userpro: true, supervisor: true, admin: true, root: true/);
-  assert.match(page, /label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true, root: true/);
-  assert.match(page, /label: "管理 ADMIN 帳號", group: "管理", user: false, userpro: false, supervisor: false, admin: false, root: true/);
+  assert.match(page, /label: "查看完整資料紀錄", group: "監測", user: false, userpro: true, supervisor: true, admin: true/);
+  assert.match(page, /label: "修改自己 30 分鐘內的提交", group: "資料", user: true, userpro: true, supervisor: true, admin: true/);
+  assert.match(page, /label: "軟刪除紀錄", group: "高風險", user: false, userpro: true, supervisor: true, admin: true/);
+  assert.match(page, /label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true/);
+  assert.doesNotMatch(page.slice(page.indexOf("const permissions"), page.indexOf("const signInOutcomeLabels")), /管理 ADMIN 帳號/);
   assert.match(rolePresentation, /user: "USER"/);
   assert.match(rolePresentation, /userpro: "AD USER"/);
   assert.match(rolePresentation, /supervisor: "POWER USER"/);
@@ -408,6 +408,8 @@ test("reserves one owner-bound ROOT and prevents ADMIN accounts from controlling
   assert.match(userStore, /row\.role === "admin" && actor\.role !== "root"/);
   assert.match(adminRoute, /isAdministratorRole/);
   assert.match(adminPage, /ROOT 是唯一系統保留帳號，不會出現在可建立角色中/);
+  assert.match(adminPage, /const permissionRoles = \["user", "userpro", "supervisor", "admin"\]/);
+  assert.doesNotMatch(adminPage.slice(adminPage.indexOf("const permissions"), adminPage.indexOf("const signInOutcomeLabels")), /管理 ADMIN 帳號|root:/);
   assert.doesNotMatch(createAccountMarkup, /option value="root"/);
   assert.doesNotMatch(migration, /'root'/);
 });
