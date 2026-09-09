@@ -4,6 +4,7 @@ import {
   AuthConfigurationError,
   getAuthRuntimeEnv,
   getRequestAuthSession,
+  isAdministratorRole,
   serializeExpiredSessionCookie,
 } from "./app/lib/auth";
 import { getStoredUserAccess } from "./app/lib/userStore";
@@ -66,12 +67,12 @@ export async function proxy(request: NextRequest) {
       ? { ...session, username: storedUser.username, name: storedUser.name, role: storedUser.role }
       : session;
 
-    if ((pathname === "/admin-area" || pathname.startsWith("/admin-area/")) && effectiveSession.role !== "admin") {
+    if ((pathname === "/admin-area" || pathname.startsWith("/admin-area/")) && !isAdministratorRole(effectiveSession.role)) {
       return NextResponse.redirect(new URL("/forbidden", request.url));
     }
 
-    if ((pathname === "/api/admin" || pathname.startsWith("/api/admin/")) && effectiveSession.role !== "admin") {
-      return NextResponse.json({ error: "只有 ADMIN 可以使用帳號管理功能。" }, { status: 403 });
+    if ((pathname === "/api/admin" || pathname.startsWith("/api/admin/")) && !isAdministratorRole(effectiveSession.role)) {
+      return NextResponse.json({ error: "只有 ADMIN 或 ROOT 可以使用帳號管理功能。" }, { status: 403 });
     }
 
     if ((pathname === "/monitor" || pathname.startsWith("/monitor/")) && effectiveSession.role === "user") {

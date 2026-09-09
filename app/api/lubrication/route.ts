@@ -600,7 +600,7 @@ export async function GET(request: Request) {
         );
       }
       if (actor.role === "user") {
-        return Response.json({ error: "只有 AD USER、POWER USER 或 ADMIN 可以查看完整資料紀錄。" }, { status: 403 });
+        return Response.json({ error: "只有 AD USER、POWER USER、ADMIN 或 ROOT 可以查看完整資料紀錄。" }, { status: 403 });
       }
       return Response.json(buildMonitorPayload(monitored), { headers: { "Cache-Control": "no-store" } });
     }
@@ -631,7 +631,7 @@ export async function POST(request: Request) {
     const requestBody = await request.json();
     const isManualEntry = isManualEntryPayload(requestBody);
     if (!isManualEntry && actor.role === "user") {
-      return Response.json({ error: "只有 AD USER、POWER USER 或 ADMIN 可以匯入 Excel。" }, { status: 403 });
+      return Response.json({ error: "只有 AD USER、POWER USER、ADMIN 或 ROOT 可以匯入 Excel。" }, { status: 403 });
     }
 
     const payload = isManualEntry
@@ -839,7 +839,7 @@ export async function DELETE(request: Request) {
       return Response.json({ error: "請先登入後再刪除紀錄。" }, { status: 401 });
     }
     if (actor.role === "user") {
-      return Response.json({ error: "只有 AD USER、POWER USER 或 ADMIN 可以刪除紀錄。" }, { status: 403 });
+      return Response.json({ error: "只有 AD USER、POWER USER、ADMIN 或 ROOT 可以刪除紀錄。" }, { status: 403 });
     }
     const payload = parseDeletePayload(await request.json());
 
@@ -903,7 +903,7 @@ export async function PUT(request: Request) {
       return Response.json({ error: "請先登入後再還原紀錄。" }, { status: 401 });
     }
     if (actor.role === "user" || actor.role === "userpro") {
-      return Response.json({ error: "只有 POWER USER 或 ADMIN 可以從垃圾桶還原紀錄。" }, { status: 403 });
+      return Response.json({ error: "只有 POWER USER、ADMIN 或 ROOT 可以從垃圾桶還原紀錄。" }, { status: 403 });
     }
     const payload = parseRestorePayload(await request.json());
     const d1 = await getD1();

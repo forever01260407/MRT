@@ -5,9 +5,11 @@ import {
   createSessionToken,
   enforceLoginRateLimit,
   getAuthRuntimeEnv,
+  isRootUsername,
   resolveAuthSecret,
   serializeSessionCookie,
   validateDevelopmentCredentials,
+  validateRootCredentials,
 } from "../../../lib/auth";
 import { authenticateStoredUser, recordSignInEvent } from "../../../lib/userStore";
 import { getRequestAuditContext } from "../../../lib/requestContext";
@@ -38,9 +40,19 @@ export async function POST(request: Request) {
     const runtimeEnv = await getAuthRuntimeEnv();
     database = runtimeEnv.DB ? await getD1() : null;
     await enforceLoginRateLimit({ request, runtimeEnv, username });
-    const account = database
-      ? await authenticateStoredUser(database, username, password, signInContext)
-      : await validateDevelopmentCredentials({ url: requestUrl, username, password });
+    const rootAttempt = isRootUsername(username);
+    const account = rootAttempt
+      ? await validateRootCredentials({ request, runtimeEnv, username, password })
+      : database
+        ? await authenticateStoredUser(database, username, password, signInContext)
+        : await validateDevelopmentCredentials({ url: requestUrl, username, password });
+    if (rootAttempt && database) {
+      await recordSignInEvent(database, {
+        username,
+        outcome: account ? "success" : "invalid_credentials",
+        context: signInContext,
+      });
+    }
     if (!account) {
       return Response.json({ error: "帳號或密碼錯誤。" }, { status: 401 });
     }

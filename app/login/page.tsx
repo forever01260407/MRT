@@ -41,7 +41,7 @@ export default function LoginPage() {
         <div className="login-brand-copy">
           <span className="login-system-state"><i></i> INTERNAL SYSTEM</span>
           <h2>資料從登入開始受到保護。</h2>
-          <p>登入後會依照帳號角色顯示可使用的功能；管理中心僅限 ADMIN 進入。</p>
+          <p>登入後會依照帳號角色顯示可使用的功能；管理中心僅限 ADMIN 與 ROOT 進入。</p>
         </div>
         <footer>NEW TAIPEI METRO · OPERATIONS &amp; MAINTENANCE</footer>
       </section>

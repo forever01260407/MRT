@@ -1,7 +1,10 @@
 export const AUTH_COOKIE_NAME = "mrt_monitor_session";
 export const AUTH_SESSION_SECONDS = 8 * 60 * 60;
 
-export type AuthRole = "user" | "userpro" | "supervisor" | "admin";
+export type AuthRole = "user" | "userpro" | "supervisor" | "admin" | "root";
+
+export const ROOT_USERNAME = "root";
+export const ROOT_USER_ID = "SYSTEM-ROOT";
 
 export type AuthSession = {
   username: string;
@@ -24,6 +27,9 @@ type RateLimiter = {
 
 export type AuthRuntimeEnv = {
   AUTH_SECRET?: string;
+  ROOT_PASSWORD?: string;
+  ROOT_OWNER_USER_ID?: string;
+  DELETE_PASSWORD?: string;
   AUTH_RATE_LIMITER?: RateLimiter;
   DB?: unknown;
 };
@@ -99,6 +105,14 @@ export function resolveAuthSecret(url: URL, runtimeEnv: AuthRuntimeEnv) {
   if (configuredSecret && configuredSecret.length >= 32) return configuredSecret;
   if (isLocalAuthHostname(url.hostname)) return localDevelopmentSecret;
   throw new AuthConfigurationError("登入服務尚未完成正式環境設定，請聯絡 ADMIN。");
+}
+
+export function isAdministratorRole(role: string | null | undefined): role is "admin" | "root" {
+  return role === "admin" || role === "root";
+}
+
+export function isRootUsername(username: string) {
+  return username.trim().toLowerCase() === ROOT_USERNAME;
 }
 
 function bytesToBase64Url(bytes: Uint8Array) {
@@ -184,8 +198,41 @@ function isStoredSession(value: unknown): value is StoredSession {
   return session.version === 1
     && typeof session.username === "string"
     && typeof session.name === "string"
-    && (session.role === "user" || session.role === "userpro" || session.role === "supervisor" || session.role === "admin")
+    && (session.role === "user" || session.role === "userpro" || session.role === "supervisor" || session.role === "admin" || session.role === "root")
     && typeof session.expiresAt === "number";
+}
+
+export async function validateRootCredentials(options: {
+  request: Request;
+  runtimeEnv: AuthRuntimeEnv;
+  username: string;
+  password: string;
+}) {
+  if (!isRootUsername(options.username)) return null;
+
+  const requestUrl = new URL(options.request.url);
+  const isLocal = isLocalAuthHostname(requestUrl.hostname);
+  const configuredPassword = options.runtimeEnv.ROOT_PASSWORD?.trim()
+    || (isLocal ? options.runtimeEnv.DELETE_PASSWORD?.trim() || ROOT_USERNAME : "");
+  if (!configuredPassword) {
+    throw new AuthConfigurationError("ROOT 登入尚未完成安全設定，請由網站擁有者處理。");
+  }
+
+  if (!isLocal) {
+    const configuredOwnerId = options.runtimeEnv.ROOT_OWNER_USER_ID?.trim();
+    const authenticatedOwnerId = options.request.headers.get("oai-authenticated-user-id")?.trim();
+    if (!configuredOwnerId) {
+      throw new AuthConfigurationError("ROOT 尚未綁定網站擁有者，請先完成部署端設定。");
+    }
+    if (!authenticatedOwnerId || !timingSafeEqual(authenticatedOwnerId, configuredOwnerId)) return null;
+  }
+
+  const [submittedHash, expectedHash] = await Promise.all([
+    sha256Hex(options.password),
+    sha256Hex(configuredPassword),
+  ]);
+  if (!timingSafeEqual(submittedHash, expectedHash)) return null;
+  return { username: ROOT_USERNAME, name: "ROOT", role: "root" as const };
 }
 
 export async function validateDevelopmentCredentials(options: {

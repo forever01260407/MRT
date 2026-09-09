@@ -1,5 +1,5 @@
 import { getD1 } from "../../../../db";
-import { getRequestAuthSession } from "../../../lib/auth";
+import { getRequestAuthSession, isAdministratorRole } from "../../../lib/auth";
 import type { AuthRole } from "../../../lib/auth";
 import type { AuditContext } from "../../../lib/auditLog";
 import { getRequestAuditContext } from "../../../lib/requestContext";
@@ -8,15 +8,16 @@ import {
   createStoredUser,
   DuplicateUsernameError,
   listUsers,
+  ReservedUsernameError,
   resetStoredUserPassword,
   updateStoredUserRole,
   updateStoredUserStatus,
   UserNotFoundError,
 } from "../../../lib/userStore";
 
-async function requireAdmin(request: Request) {
+async function requireAdministrator(request: Request) {
   const session = await getRequestAuthSession(request);
-  return session?.role === "admin" ? session : null;
+  return isAdministratorRole(session?.role) ? session : null;
 }
 
 function getAdminAuditContext(request: Request, session: { username: string; role: AuthRole }): AuditContext {
@@ -29,8 +30,8 @@ function getAdminAuditContext(request: Request, session: { username: string; rol
 
 export async function GET(request: Request) {
   try {
-    if (!await requireAdmin(request)) {
-      return Response.json({ error: "只有 ADMIN 可以管理人員帳號。" }, { status: 403 });
+    if (!await requireAdministrator(request)) {
+      return Response.json({ error: "只有 ADMIN 或 ROOT 可以管理人員帳號。" }, { status: 403 });
     }
     const users = await listUsers(await getD1());
     return Response.json({ users }, { headers: { "Cache-Control": "no-store" } });
@@ -44,9 +45,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const session = await requireAdmin(request);
+    const session = await requireAdministrator(request);
     if (!session) {
-      return Response.json({ error: "只有 ADMIN 可以建立人員帳號。" }, { status: 403 });
+      return Response.json({ error: "只有 ADMIN 或 ROOT 可以建立人員帳號。" }, { status: 403 });
     }
 
     const payload = await request.json() as Record<string, unknown>;
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
     });
     return Response.json({ user }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    if (error instanceof DuplicateUsernameError) {
+    if (error instanceof DuplicateUsernameError || error instanceof ReservedUsernameError) {
       return Response.json({ error: error.message }, { status: 409 });
     }
     return Response.json(
@@ -85,9 +86,9 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const session = await requireAdmin(request);
+    const session = await requireAdministrator(request);
     if (!session) {
-      return Response.json({ error: "只有 ADMIN 可以管理人員帳號。" }, { status: 403 });
+      return Response.json({ error: "只有 ADMIN 或 ROOT 可以管理人員帳號。" }, { status: 403 });
     }
 
     const payload = await request.json() as Record<string, unknown>;
@@ -106,6 +107,8 @@ export async function PATCH(request: Request) {
       const user = await resetStoredUserPassword(database, {
         userId,
         password,
+        actorUsername: session.username,
+        actorRole: session.role,
         audit: getAdminAuditContext(request, session),
       });
       return Response.json({ user }, { headers: { "Cache-Control": "no-store" } });
@@ -120,6 +123,7 @@ export async function PATCH(request: Request) {
         userId,
         status,
         actorUsername: session.username,
+        actorRole: session.role,
         audit: getAdminAuditContext(request, session),
       });
       return Response.json({ user }, { headers: { "Cache-Control": "no-store" } });
@@ -134,6 +138,7 @@ export async function PATCH(request: Request) {
         userId,
         role,
         actorUsername: session.username,
+        actorRole: session.role,
         audit: getAdminAuditContext(request, session),
       });
       return Response.json({ user }, { headers: { "Cache-Control": "no-store" } });
@@ -144,7 +149,7 @@ export async function PATCH(request: Request) {
     if (error instanceof UserNotFoundError) {
       return Response.json({ error: error.message }, { status: 404 });
     }
-    if (error instanceof AccountProtectionError) {
+    if (error instanceof AccountProtectionError || error instanceof ReservedUsernameError) {
       return Response.json({ error: error.message }, { status: 409 });
     }
     return Response.json(

@@ -95,20 +95,21 @@ const statusLabels: Record<UserStatus, string> = {
 };
 
 const permissions = [
-  { label: "查看監測總覽", group: "監測", user: true, userpro: true, supervisor: true, admin: true },
-  { label: "查看完整資料紀錄", group: "監測", user: false, userpro: true, supervisor: true, admin: true },
-  { label: "登記現場量測", group: "資料", user: true, userpro: true, supervisor: true, admin: true },
-  { label: "修改自己 30 分鐘內的提交", group: "資料", user: true, userpro: true, supervisor: true, admin: true },
-  { label: "匯入 Excel 資料", group: "資料", user: false, userpro: true, supervisor: true, admin: true },
-  { label: "更正任意量測紀錄", group: "資料", user: false, userpro: true, supervisor: true, admin: true },
-  { label: "設定設備階軸", group: "設備", user: false, userpro: false, supervisor: true, admin: true },
-  { label: "軟刪除紀錄", group: "高風險", user: false, userpro: true, supervisor: true, admin: true },
-  { label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true },
-  { label: "管理人員與角色", group: "管理", user: false, userpro: false, supervisor: false, admin: true },
-  { label: "查看完整操作紀錄", group: "管理", user: false, userpro: false, supervisor: false, admin: true },
+  { label: "查看監測總覽", group: "監測", user: true, userpro: true, supervisor: true, admin: true, root: true },
+  { label: "查看完整資料紀錄", group: "監測", user: false, userpro: true, supervisor: true, admin: true, root: true },
+  { label: "登記現場量測", group: "資料", user: true, userpro: true, supervisor: true, admin: true, root: true },
+  { label: "修改自己 30 分鐘內的提交", group: "資料", user: true, userpro: true, supervisor: true, admin: true, root: true },
+  { label: "匯入 Excel 資料", group: "資料", user: false, userpro: true, supervisor: true, admin: true, root: true },
+  { label: "更正任意量測紀錄", group: "資料", user: false, userpro: true, supervisor: true, admin: true, root: true },
+  { label: "設定設備階軸", group: "設備", user: false, userpro: false, supervisor: true, admin: true, root: true },
+  { label: "軟刪除紀錄", group: "高風險", user: false, userpro: true, supervisor: true, admin: true, root: true },
+  { label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true, root: true },
+  { label: "管理一般人員與角色", group: "管理", user: false, userpro: false, supervisor: false, admin: true, root: true },
+  { label: "管理 ADMIN 帳號", group: "管理", user: false, userpro: false, supervisor: false, admin: false, root: true },
+  { label: "查看完整操作紀錄", group: "管理", user: false, userpro: false, supervisor: false, admin: true, root: true },
 ] as const;
 
-const permissionRoles = ["user", "userpro", "supervisor", "admin"] as const;
+const permissionRoles = ["user", "userpro", "supervisor", "admin", "root"] as const;
 
 const signInOutcomeLabels: Record<SignInOutcome, string> = {
   success: "登入成功",
@@ -152,7 +153,7 @@ function auditRoleLabel(role: string) {
   if (role === "system") return "系統";
   if (role === "anonymous") return "未驗證";
   if (role === "歷史未提供") return role;
-  if (role === "user" || role === "userpro" || role === "supervisor" || role === "admin") {
+  if (role === "user" || role === "userpro" || role === "supervisor" || role === "admin" || role === "root") {
     return getRoleDisplayLabel(role);
   }
   return role;
@@ -347,8 +348,15 @@ export default function AdminAreaPage() {
   const userproCount = users.filter((user) => user.role === "userpro" && user.status !== "disabled").length;
   const supervisorCount = users.filter((user) => user.role === "supervisor" && user.status !== "disabled").length;
   const adminCount = users.filter((user) => user.role === "admin" && user.status !== "disabled").length;
+  const rootCount = users.filter((user) => user.role === "root").length;
   const activeSessions = users.reduce((sum, user) => sum + user.sessions, 0);
   const selectedUser = users.find((user) => user.id === selectedUserId) ?? null;
+  const authenticatedIsRoot = authenticatedUser?.role === "root";
+  const selectedIsRoot = selectedUser?.role === "root";
+  const selectedIsAdmin = selectedUser?.role === "admin";
+  const selectedIsOwnAccount = selectedUser?.username === authenticatedUser?.username;
+  const roleOrStatusProtected = Boolean(selectedIsRoot || (selectedIsAdmin && !authenticatedIsRoot));
+  const passwordProtected = Boolean(selectedIsRoot || (selectedIsAdmin && !authenticatedIsRoot && !selectedIsOwnAccount));
   const currentSection = sectionCopy[activeSection];
 
   const filteredUsers = useMemo(() => {
@@ -628,7 +636,7 @@ export default function AdminAreaPage() {
               <section className="admin-panel admin-users-panel" aria-labelledby="users-table-title">
                 <div className="admin-toolbar">
                   <label className="admin-search"><span className="visually-hidden">搜尋帳號</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜尋姓名、帳號或編號" /></label>
-                  <label><span>角色</span><select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as UserRole | "all")}><option value="all">全部角色</option><option value="user">USER</option><option value="userpro">AD USER</option><option value="supervisor">POWER USER</option><option value="admin">ADMIN</option></select></label>
+                  <label><span>角色</span><select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as UserRole | "all")}><option value="all">全部角色</option><option value="root">ROOT</option><option value="user">USER</option><option value="userpro">AD USER</option><option value="supervisor">POWER USER</option><option value="admin">ADMIN</option></select></label>
                   <label><span>狀態</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as UserStatus | "all")}><option value="all">全部狀態</option><option value="active">使用中</option><option value="locked">已鎖定</option><option value="disabled">已停用</option></select></label>
                   <span className="admin-result-count">{filteredUsers.length} / {users.length} 人</span>
                 </div>
@@ -644,7 +652,7 @@ export default function AdminAreaPage() {
                           <td><span className={`admin-role-badge ${user.role}`}>{getRoleDisplayLabel(user.role)}</span></td>
                           <td><span className={`admin-status ${user.status}`}>{statusLabels[user.status]}</span></td>
                           <td>{user.lastLogin}</td><td>{user.createdAt}</td>
-                          <td><button type="button" className="admin-row-action" onClick={() => openUser(user.id)}>管理</button></td>
+                          <td><button type="button" className="admin-row-action" onClick={() => openUser(user.id)}>{user.role === "root" ? "查看" : "管理"}</button></td>
                         </tr>
                       ))}
                     </tbody>
@@ -661,16 +669,17 @@ export default function AdminAreaPage() {
                   <article className="userpro"><span>AD</span><div><strong className="role-display-badge userpro">AD USER</strong><small>匯入、更正與軟刪除</small></div><b>{userproCount} 人</b></article>
                   <article className="supervisor"><span>P</span><div><strong className="role-display-badge supervisor">POWER USER</strong><small>進階資料操作</small></div><b>{supervisorCount} 人</b></article>
                   <article className="admin"><span>A</span><div><strong className="role-display-badge admin">ADMIN</strong><small>系統與帳號管理</small></div><b>{adminCount} 人</b></article>
+                  <article className="root"><span>R</span><div><strong className="role-display-badge root">ROOT</strong><small>唯一網站擁有者</small></div><b>{rootCount} 人</b></article>
                 </section>
                 <section className="admin-panel" aria-labelledby="permission-title">
-                  <header className="admin-panel-heading"><div><span className="panel-kicker">PERMISSION MATRIX</span><h3 id="permission-title">功能權限矩陣</h3></div><span className="admin-readonly-badge">第一版固定角色</span></header>
+                  <header className="admin-panel-heading"><div><span className="panel-kicker">PERMISSION MATRIX</span><h3 id="permission-title">功能權限矩陣</h3></div><span className="admin-readonly-badge">ROOT 系統固定</span></header>
                   <div className="admin-table-wrap">
                     <table className="admin-table permission-table">
                       <thead><tr><th>功能</th><th>分類</th>{permissionRoles.map((role) => <th key={role}><span className={`role-display-badge ${role}`}>{getRoleDisplayLabel(role)}</span></th>)}</tr></thead>
                       <tbody>{permissions.map((permission) => <tr key={permission.label}><td><strong>{permission.label}</strong></td><td><span className="admin-permission-group">{permission.group}</span></td>{permissionRoles.map((role) => <td key={role}><span className={permission[role] ? "permission-yes" : "permission-no"}>{permission[role] ? "✓" : "—"}</span></td>)}</tr>)}</tbody>
                     </table>
                   </div>
-                  <p className="admin-panel-footnote"><strong>USER</strong> 只能在「我的近期提交」修改本人 30 分鐘內的現場紀錄；逾時須由 AD USER 以上角色更正。</p>
+                  <p className="admin-panel-footnote"><strong>USER</strong> 只能在「我的近期提交」修改本人 30 分鐘內的現場紀錄；逾時須由 AD USER 以上角色更正。<strong> ROOT</strong> 為唯一系統保留帳號，不能由介面建立、停用或降級；ADMIN 彼此不能變更角色或狀態。</p>
                 </section>
               </div>
             ) : null}
@@ -723,7 +732,7 @@ export default function AdminAreaPage() {
                   </section>
                   <section className="admin-panel" aria-labelledby="policy-title">
                     <header className="admin-panel-heading"><div><span className="panel-kicker">SECURITY POLICY</span><h3 id="policy-title">預設登入規則</h3></div></header>
-                    <dl className="admin-policy-list"><div><dt>連續失敗</dt><dd>5 次後鎖定 15 分鐘</dd></div><div><dt>登入有效時間</dt><dd>8 小時後重新登入</dd></div><div><dt>ADMIN 帳號</dt><dd>系統至少保留 1 位</dd></div></dl>
+                    <dl className="admin-policy-list"><div><dt>連續失敗</dt><dd>5 次後鎖定 15 分鐘</dd></div><div><dt>登入有效時間</dt><dd>8 小時後重新登入</dd></div><div><dt>ROOT 帳號</dt><dd>唯一且綁定網站擁有者</dd></div><div><dt>ADMIN 帳號</dt><dd>彼此不能停用、降級或接管</dd></div></dl>
                   </section>
                 </div>
                 <section className="admin-panel" aria-labelledby="login-event-title">
@@ -749,7 +758,7 @@ export default function AdminAreaPage() {
               <label><span>角色 <b>*</b></span><select name="role" defaultValue="user"><option value="user">USER－一般操作</option><option value="userpro">AD USER－匯入、更正與軟刪除</option><option value="supervisor">POWER USER－階軸設定與資料還原</option><option value="admin">ADMIN－系統與帳號管理</option></select></label>
               <label><span>登入密碼 <b>*</b></span><input name="password" type="password" required placeholder="由 ADMIN 自行設定" autoComplete="new-password" /></label>
               {formError ? <div className="admin-form-error" role="alert">{formError}</div> : null}
-              <p className="admin-local-note">帳號會儲存至本機 D1；建立完成後可立即登入，重新整理也會保留。</p>
+              <p className="admin-local-note">一般帳號會儲存至 D1；ROOT 是唯一系統保留帳號，不會出現在可建立角色中。</p>
               <footer><button type="button" className="admin-secondary-button" onClick={() => setIsCreateOpen(false)} disabled={creatingAccount}>取消</button><button type="submit" className="admin-primary-button" disabled={creatingAccount}>{creatingAccount ? "建立中…" : "建立帳號"}</button></footer>
             </form>
           </section>
@@ -762,8 +771,8 @@ export default function AdminAreaPage() {
             <header><div><span className={`admin-user-avatar large ${selectedUser.role}`} aria-hidden="true">{userInitials(selectedUser.name)}</span><div><span className="panel-kicker">{selectedUser.id}</span><h3 id="user-detail-title">{selectedUser.name}</h3><p>@{selectedUser.username}</p></div></div><button type="button" onClick={closeUser} disabled={Boolean(accountAction)} aria-label="關閉人員帳號詳情">×</button></header>
             <div className="admin-user-detail-body">
               <dl><div><dt>目前狀態</dt><dd><span className={`admin-status ${selectedUser.status}`}>{statusLabels[selectedUser.status]}</span></dd></div><div><dt>最後登入</dt><dd>{selectedUser.lastLogin}</dd></div><div><dt>登入階段</dt><dd>{selectedUser.sessions} 個</dd></div><div><dt>建立日期</dt><dd>{selectedUser.createdAt}</dd></div></dl>
-              <label><span>角色</span><select value={selectedUser.role} onChange={(event) => void changeSelectedUserRole(event.target.value as UserRole)} disabled={selectedUser.username === authenticatedUser?.username || Boolean(accountAction)}><option value="user">USER</option><option value="userpro">AD USER</option><option value="supervisor">POWER USER</option><option value="admin">ADMIN</option></select><small>{selectedUser.username === authenticatedUser?.username ? "目前登入的 ADMIN 不能降級自己的帳號。" : "選擇後會立即更新此人的系統權限。"}</small></label>
-              <div className="admin-user-actions"><button type="button" onClick={() => { setResetPasswordOpen((current) => !current); setAccountActionError(""); }} disabled={Boolean(accountAction)}>{resetPasswordOpen ? "取消重設" : "重設密碼"}</button><button type="button" className={selectedUser.status === "disabled" || selectedUser.status === "locked" ? "success" : "danger"} onClick={() => void toggleSelectedUserStatus()} disabled={selectedUser.username === authenticatedUser?.username || Boolean(accountAction)}>{accountAction === "status" ? "處理中…" : selectedUser.status === "disabled" || selectedUser.status === "locked" ? "啟用帳號" : "停用帳號"}</button></div>
+              <label><span>角色</span><select value={selectedUser.role} onChange={(event) => void changeSelectedUserRole(event.target.value as UserRole)} disabled={roleOrStatusProtected || Boolean(accountAction)}>{selectedUser.role === "root" ? <option value="root">ROOT</option> : null}<option value="user">USER</option><option value="userpro">AD USER</option><option value="supervisor">POWER USER</option><option value="admin">ADMIN</option></select><small>{selectedIsRoot ? "ROOT 是唯一系統保留角色，不能從帳號管理介面變更。" : selectedIsAdmin && !authenticatedIsRoot ? "ADMIN 彼此不能降級或停用；只有 ROOT 可以管理 ADMIN。" : "選擇後會立即更新此人的系統權限。"}</small></label>
+              <div className="admin-user-actions"><button type="button" onClick={() => { setResetPasswordOpen((current) => !current); setAccountActionError(""); }} disabled={passwordProtected || Boolean(accountAction)}>{resetPasswordOpen ? "取消重設" : "重設密碼"}</button><button type="button" className={selectedUser.status === "disabled" || selectedUser.status === "locked" ? "success" : "danger"} onClick={() => void toggleSelectedUserStatus()} disabled={roleOrStatusProtected || Boolean(accountAction)}>{accountAction === "status" ? "處理中…" : selectedUser.status === "disabled" || selectedUser.status === "locked" ? "啟用帳號" : "停用帳號"}</button></div>
               {resetPasswordOpen ? <form className="admin-reset-password-form" onSubmit={resetSelectedUserPassword}><strong>設定新的登入密碼</strong><label><span>新密碼</span><input name="newPassword" type="password" required autoFocus autoComplete="new-password" /></label><label><span>再次輸入新密碼</span><input name="confirmPassword" type="password" required autoComplete="new-password" /></label><small>不限制長度或字元組合；儲存後舊密碼立即失效。</small><button type="submit" className="admin-primary-button" disabled={Boolean(accountAction)}>{accountAction === "password" ? "儲存中…" : "儲存新密碼"}</button></form> : null}
               {accountActionError ? <div className="admin-form-error" role="alert">{accountActionError}</div> : null}
             </div>

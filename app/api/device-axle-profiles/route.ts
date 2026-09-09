@@ -87,7 +87,7 @@ export async function PUT(request: Request) {
       return Response.json({ error: "請先登入後再變更階軸設定。" }, { status: 401 });
     }
     if (actor.role === "user" || actor.role === "userpro") {
-      return Response.json({ error: "只有 POWER USER 或 ADMIN 可以變更階軸設定。" }, { status: 403 });
+      return Response.json({ error: "只有 POWER USER、ADMIN 或 ROOT 可以變更階軸設定。" }, { status: 403 });
     }
     const payload = parsePayload(await request.json());
 

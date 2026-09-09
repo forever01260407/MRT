@@ -49,13 +49,13 @@ export function useAuthSession() {
 
 export function AdminNavItem({ active = false }: { active?: boolean }) {
   const { user, loading } = useAuthSession();
-  if (loading || user?.role !== "admin") return null;
+  if (loading || (user?.role !== "admin" && user?.role !== "root")) return null;
   return (
     <a
       href="/admin-area"
       className={`nav-item admin-nav-item ${active ? "active" : ""}`}
       aria-current={active ? "page" : undefined}
-      data-requires-role="admin"
+      data-requires-role="admin-or-root"
     >
       ADMIN AREA
     </a>

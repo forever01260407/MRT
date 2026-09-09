@@ -10,6 +10,8 @@ async function loadWorker() {
 }
 
 const workerEnvironment = {
+  ROOT_PASSWORD: "root",
+  ROOT_OWNER_USER_ID: "test-site-owner",
   ASSETS: {
     fetch: async () => new Response("Not found", { status: 404 }),
   },
@@ -70,7 +72,7 @@ test("requires a signed-in session before showing the monitoring site", async ()
   assert.doesNotMatch(loginSource, /localAccounts|local-account-panel|點選即可帶入/);
 });
 
-test("creates the three local roles and restricts admin area on the server", async () => {
+test("creates the local roles, reserves ROOT, and restricts admin area on the server", async () => {
   const worker = await loadWorker();
   for (const username of ["admin", "supervisor", "user"]) {
     const cookie = await login(worker, username, username);
@@ -112,6 +114,15 @@ test("creates the three local roles and restricts admin area on the server", asy
     headers: { accept: "text/html", cookie: adminCookie },
   });
   assert.equal(allowedResponse.status, 200);
+
+  const rootCookie = await login(worker, "root", "root");
+  const rootSessionResponse = await dispatch(worker, "/api/auth/session", { headers: { cookie: rootCookie } });
+  assert.equal(rootSessionResponse.status, 200);
+  assert.equal((await rootSessionResponse.json()).user.role, "root");
+  const rootAdminResponse = await dispatch(worker, "/admin-area", {
+    headers: { accept: "text/html", cookie: rootCookie },
+  });
+  assert.equal(rootAdminResponse.status, 200);
 });
 
 test("rejects incorrect credentials and tampered session cookies", async () => {
@@ -121,6 +132,13 @@ test("rejects incorrect credentials and tampered session cookies", async () => {
     body: JSON.stringify({ username: "admin", password: "wrong" }),
   });
   assert.equal(badLogin.status, 401);
+
+  const badRootLogin = await renderAnonymous("/api/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username: "root", password: "wrong" }),
+  });
+  assert.equal(badRootLogin.status, 401);
 
   const protectedResponse = await renderAnonymous("/admin-area", {
     headers: { cookie: "mrt_monitor_session=forged.payload" },
@@ -148,6 +166,7 @@ test("server-renders the rail lubrication monitoring dashboard", async () => {
   assert.match(page, /signedInUser\?\.role === "userpro"/);
   assert.match(page, /signedInUser\?\.role === "supervisor"/);
   assert.match(page, /signedInUser\?\.role === "admin"/);
+  assert.match(page, /signedInUser\?\.role === "root"/);
   assert.doesNotMatch(html, /class="nav-item"[^>]*>Monitor 完整紀錄/);
   assert.match(html, /固定潤滑設備/);
   assert.match(html, /MOK 10 · LB 10/);
@@ -281,8 +300,8 @@ test("server-renders the operational admin area framework", async () => {
   assert.match(html, /最近系統操作/);
   assert.match(html, /新增帳號/);
   assert.match(page, /<AdminNavItem active \/>/);
-  assert.match(authChrome, /user\?\.role !== "admin"/);
-  assert.match(authChrome, /data-requires-role="admin"/);
+  assert.match(authChrome, /user\?\.role !== "admin" && user\?\.role !== "root"/);
+  assert.match(authChrome, /data-requires-role="admin-or-root"/);
   assert.match(page, /人員帳號/);
   assert.match(page, /角色與權限/);
   assert.match(page, /操作紀錄/);
@@ -291,14 +310,16 @@ test("server-renders the operational admin area framework", async () => {
   assert.match(page, /8 小時後重新登入/);
   assert.match(page, /AD USER－匯入、更正與軟刪除/);
   assert.match(page, /功能權限矩陣/);
-  assert.match(page, /label: "查看完整資料紀錄", group: "監測", user: false, userpro: true, supervisor: true, admin: true/);
-  assert.match(page, /label: "修改自己 30 分鐘內的提交", group: "資料", user: true, userpro: true, supervisor: true, admin: true/);
-  assert.match(page, /label: "軟刪除紀錄", group: "高風險", user: false, userpro: true, supervisor: true, admin: true/);
-  assert.match(page, /label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true/);
+  assert.match(page, /label: "查看完整資料紀錄", group: "監測", user: false, userpro: true, supervisor: true, admin: true, root: true/);
+  assert.match(page, /label: "修改自己 30 分鐘內的提交", group: "資料", user: true, userpro: true, supervisor: true, admin: true, root: true/);
+  assert.match(page, /label: "軟刪除紀錄", group: "高風險", user: false, userpro: true, supervisor: true, admin: true, root: true/);
+  assert.match(page, /label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true, root: true/);
+  assert.match(page, /label: "管理 ADMIN 帳號", group: "管理", user: false, userpro: false, supervisor: false, admin: false, root: true/);
   assert.match(rolePresentation, /user: "USER"/);
   assert.match(rolePresentation, /userpro: "AD USER"/);
   assert.match(rolePresentation, /supervisor: "POWER USER"/);
   assert.match(rolePresentation, /admin: "ADMIN"/);
+  assert.match(rolePresentation, /root: "ROOT"/);
   assert.match(authChrome, /getRoleDisplayLabel\(user\.role\)/);
   assert.match(page, /getRoleDisplayLabel\(user\.role\)/);
   assert.match(page, /getRoleDisplayLabel\(role\)/);
@@ -306,6 +327,7 @@ test("server-renders the operational admin area framework", async () => {
   assert.match(styles, /\.role-display-badge\.userpro \{[^}]*#2563eb/);
   assert.match(styles, /\.role-display-badge\.supervisor \{[^}]*#c2410c/);
   assert.match(styles, /\.role-display-badge\.admin \{[^}]*#c62845/);
+  assert.match(styles, /\.role-display-badge\.root \{[^}]*#f2c66d/);
   assert.doesNotMatch(page, /首次登入時要求更換密碼|強制更換暫時密碼|forcePasswordChange/);
   assert.match(page, /登入帳號／顯示名稱/);
   assert.match(page, /完整操作事件/);
@@ -361,6 +383,35 @@ test("persists admin-created accounts in D1 and uses them for login", async () =
   }
 });
 
+test("reserves one owner-bound ROOT and prevents ADMIN accounts from controlling peers", async () => {
+  const auth = await readFile(new URL("../app/lib/auth.ts", import.meta.url), "utf8");
+  const loginRoute = await readFile(new URL("../app/api/auth/login/route.ts", import.meta.url), "utf8");
+  const adminRoute = await readFile(new URL("../app/api/admin/users/route.ts", import.meta.url), "utf8");
+  const userStore = await readFile(new URL("../app/lib/userStore.ts", import.meta.url), "utf8");
+  const adminPage = await readFile(new URL("../app/admin-area/page.tsx", import.meta.url), "utf8");
+  const migration = await readFile(new URL("../drizzle/0009_glorious_maggott.sql", import.meta.url), "utf8");
+  const createAccountMarkup = adminPage.slice(
+    adminPage.indexOf('id="create-account-title"'),
+    adminPage.indexOf("{selectedUser ?"),
+  );
+
+  assert.match(auth, /export const ROOT_USERNAME = "root"/);
+  assert.match(auth, /export const ROOT_USER_ID = "SYSTEM-ROOT"/);
+  assert.match(auth, /oai-authenticated-user-id/);
+  assert.match(auth, /ROOT_OWNER_USER_ID/);
+  assert.match(auth, /ROOT_PASSWORD/);
+  assert.match(loginRoute, /validateRootCredentials/);
+  assert.match(userStore, /function systemRootUser/);
+  assert.match(userStore, /ROOT 是網站擁有者的系統保留帳號/);
+  assert.match(userStore, /ADMIN 彼此不能停用或變更角色；只有 ROOT 可以管理 ADMIN/);
+  assert.match(userStore, /ADMIN 不能重設其他 ADMIN 的密碼；請由 ROOT 處理/);
+  assert.match(userStore, /row\.role === "admin" && actor\.role !== "root"/);
+  assert.match(adminRoute, /isAdministratorRole/);
+  assert.match(adminPage, /ROOT 是唯一系統保留帳號，不會出現在可建立角色中/);
+  assert.doesNotMatch(createAccountMarkup, /option value="root"/);
+  assert.doesNotMatch(migration, /'root'/);
+});
+
 test("persists password resets, role changes, and account disabling without exposing delete", async () => {
   const page = await readFile(new URL("../app/admin-area/page.tsx", import.meta.url), "utf8");
   const route = await readFile(new URL("../app/api/admin/users/route.ts", import.meta.url), "utf8");
@@ -402,7 +453,7 @@ test("records and displays a unified audit trail with IP and before-after detail
   assert.match(auditMigration, /CREATE INDEX `idx_audit_events_action_occurred_at`/);
   assert.match(auditStore, /listUnifiedAuditEvents/);
   assert.match(auditStore, /歷史未提供/);
-  assert.match(auditRoute, /actor\.role !== "admin"/);
+  assert.match(auditRoute, /!isAdministratorRole\(actor\.role\)/);
   assert.match(adminRoute, /getAdminAuditContext/);
   assert.match(userStore, /action: "user\.role_changed"/);
   assert.match(userStore, /action: "user\.status_changed"/);
@@ -514,7 +565,7 @@ test("returns the current Cloudflare time as uncached UTC with Taipei metadata",
   assert.ok(Number.isFinite(Date.parse(payload.now)));
 });
 
-test("lets POWER USER and ADMIN move records to Trash and restore them", async () => {
+test("lets POWER USER, ADMIN, and ROOT move records to Trash and restore them", async () => {
   const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
   const page = await readFile(new URL("../app/monitor/page.tsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
@@ -532,14 +583,14 @@ test("lets POWER USER and ADMIN move records to Trash and restore them", async (
   assert.match(deleteHandler, /INSERT INTO measurement_lifecycle_events/);
   assert.doesNotMatch(deleteHandler, /DELETE FROM measurements/);
   assert.match(restoreHandler, /actor\.role === "user"/);
-  assert.match(restoreHandler, /只有 POWER USER 或 ADMIN 可以從垃圾桶還原紀錄/);
+  assert.match(restoreHandler, /只有 POWER USER、ADMIN 或 ROOT 可以從垃圾桶還原紀錄/);
   assert.match(restoreHandler, /SET deleted_at = NULL, deleted_by = NULL, deleted_ip = NULL, delete_reason = NULL/);
   assert.match(restoreHandler, /'restored'/);
   assert.match(page, /method: "DELETE"/);
   assert.match(page, /method: "PUT"/);
   assert.match(page, /🗑 垃圾桶（已刪除）/);
-  assert.match(page, /const canDelete = signedInUser\?\.role === "userpro" \|\| signedInUser\?\.role === "supervisor" \|\| signedInUser\?\.role === "admin"/);
-  assert.match(page, /const canRestore = signedInUser\?\.role === "supervisor" \|\| signedInUser\?\.role === "admin"/);
+  assert.match(page, /const canDelete = signedInUser\?\.role === "userpro" \|\| signedInUser\?\.role === "supervisor" \|\| signedInUser\?\.role === "admin" \|\| signedInUser\?\.role === "root"/);
+  assert.match(page, /const canRestore = signedInUser\?\.role === "supervisor" \|\| signedInUser\?\.role === "admin" \|\| signedInUser\?\.role === "root"/);
   assert.match(page, /已標註失效，並從總覽、圖表與統計中排除/);
   assert.doesNotMatch(page, /刪除密碼|deletePassword/);
   assert.match(page, /刪除原因/);
@@ -661,11 +712,11 @@ test("enables AD USER with the agreed data permissions while reserving axle and 
   const auditMigration = await readFile(new URL("../drizzle/0008_lying_slayback.sql", import.meta.url), "utf8");
   const migration = await readFile(new URL("../drizzle/0009_glorious_maggott.sql", import.meta.url), "utf8");
 
-  assert.match(auth, /export type AuthRole = "user" \| "userpro" \| "supervisor" \| "admin"/);
+  assert.match(auth, /export type AuthRole = "user" \| "userpro" \| "supervisor" \| "admin" \| "root"/);
   assert.match(adminRoute, /role !== "userpro"/);
   assert.doesNotMatch(adminPage, /userpro" disabled|AD USER（未啟用）|暫不開放指派/);
-  assert.match(lubricationRoute, /只有 AD USER、POWER USER 或 ADMIN 可以匯入 Excel/);
-  assert.match(lubricationRoute, /只有 AD USER、POWER USER 或 ADMIN 可以刪除紀錄/);
+  assert.match(lubricationRoute, /只有 AD USER、POWER USER、ADMIN 或 ROOT 可以匯入 Excel/);
+  assert.match(lubricationRoute, /只有 AD USER、POWER USER、ADMIN 或 ROOT 可以刪除紀錄/);
   assert.match(axleRoute, /actor\.role === "user" \|\| actor\.role === "userpro"/);
   assert.match(proxy, /effectiveSession\.role === "user" \|\| effectiveSession\.role === "userpro"/);
   assert.match(migration, /IN \('user', 'userpro', 'supervisor', 'admin'\)/);

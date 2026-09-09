@@ -83,6 +83,12 @@ export default defineConfig(async ({ command, mode }) => {
             ...(localEnv.AUTH_SECRET
               ? { AUTH_SECRET: localEnv.AUTH_SECRET }
               : {}),
+            ...(localEnv.ROOT_PASSWORD
+              ? { ROOT_PASSWORD: localEnv.ROOT_PASSWORD }
+              : {}),
+            ...(localEnv.ROOT_OWNER_USER_ID
+              ? { ROOT_OWNER_USER_ID: localEnv.ROOT_OWNER_USER_ID }
+              : {}),
           },
         }
       : { keep_vars: true }),

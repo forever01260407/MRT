@@ -1,12 +1,12 @@
 import { getD1 } from "../../../../db";
-import { getRequestAuthSession } from "../../../lib/auth";
+import { getRequestAuthSession, isAdministratorRole } from "../../../lib/auth";
 import { getSignInSecuritySnapshot } from "../../../lib/userStore";
 
 export async function GET(request: Request) {
   try {
     const session = await getRequestAuthSession(request);
-    if (session?.role !== "admin") {
-      return Response.json({ error: "只有 ADMIN 可以查看登入安全紀錄。" }, { status: 403 });
+    if (!isAdministratorRole(session?.role)) {
+      return Response.json({ error: "只有 ADMIN 或 ROOT 可以查看登入安全紀錄。" }, { status: 403 });
     }
 
     const snapshot = await getSignInSecuritySnapshot(await getD1());

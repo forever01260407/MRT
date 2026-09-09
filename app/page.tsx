@@ -657,9 +657,9 @@ function HistoryChart({ devices, expanded = false }: { devices: Device[]; expand
 
 export default function Home() {
   const { user: signedInUser, loading: authLoading } = useAuthSession();
-  const canImportExcel = !authLoading && (signedInUser?.role === "userpro" || signedInUser?.role === "supervisor" || signedInUser?.role === "admin");
-  const canConfigureAxle = !authLoading && (signedInUser?.role === "supervisor" || signedInUser?.role === "admin");
-  const canOpenMonitor = !authLoading && (signedInUser?.role === "userpro" || signedInUser?.role === "supervisor" || signedInUser?.role === "admin");
+  const canImportExcel = !authLoading && (signedInUser?.role === "userpro" || signedInUser?.role === "supervisor" || signedInUser?.role === "admin" || signedInUser?.role === "root");
+  const canConfigureAxle = !authLoading && (signedInUser?.role === "supervisor" || signedInUser?.role === "admin" || signedInUser?.role === "root");
+  const canOpenMonitor = !authLoading && (signedInUser?.role === "userpro" || signedInUser?.role === "supervisor" || signedInUser?.role === "admin" || signedInUser?.role === "root");
   const topologyRef = useRef<HTMLDivElement>(null);
   const expandedTopologyRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);

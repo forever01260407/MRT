@@ -1,5 +1,11 @@
 import { getD1 } from "../../db";
-import { createPasswordCredential, verifyPassword } from "./auth";
+import {
+  createPasswordCredential,
+  isRootUsername,
+  ROOT_USER_ID,
+  ROOT_USERNAME,
+  verifyPassword,
+} from "./auth";
 import type { AuthRole, PasswordCredential } from "./auth";
 import { ensureAuditEventsTable, prepareAuditEvent } from "./auditLog";
 import type { AuditContext } from "./auditLog";
@@ -117,6 +123,20 @@ const initialAccounts: Array<{
 
 let usersTableReady: Promise<void> | null = null;
 
+function systemRootUser(lastLoginAt: string | null = null): StoredUser {
+  return {
+    id: ROOT_USER_ID,
+    name: "ROOT",
+    username: ROOT_USERNAME,
+    role: "root",
+    status: "active",
+    lastLoginAt,
+    createdBy: "system",
+    createdAt: "系統保留",
+    updatedAt: "系統保留",
+  };
+}
+
 function publicUser(row: StoredUserRow): StoredUser {
   return {
     id: row.id,
@@ -138,6 +158,13 @@ export class DuplicateUsernameError extends Error {
   }
 }
 
+export class ReservedUsernameError extends Error {
+  constructor() {
+    super("ROOT 是網站擁有者的系統保留帳號，不能從帳號管理介面建立。");
+    this.name = "ReservedUsernameError";
+  }
+}
+
 export class UserNotFoundError extends Error {
   constructor() {
     super("找不到這個人員帳號。");
@@ -153,6 +180,9 @@ export class AccountProtectionError extends Error {
 }
 
 async function findUserById(database: Database, userId: string) {
+  if (userId === ROOT_USER_ID) {
+    throw new AccountProtectionError("ROOT 是系統唯一最高管理者，不能從帳號管理介面變更。");
+  }
   const row = await database.prepare(
     `SELECT id, name, username, role, status, password_hash, password_salt,
       password_iterations, force_password_change, last_login_at, created_by, created_at, updated_at
@@ -162,26 +192,19 @@ async function findUserById(database: Database, userId: string) {
   return row;
 }
 
-async function assertAdminCanBeChanged(
-  database: Database,
+function assertAccountRoleOrStatusCanBeChanged(
   row: StoredUserRow,
-  nextRole: AuthRole,
-  nextStatus: UserStatus,
-  actorUsername: string,
+  actor: { username: string; role: AuthRole },
 ) {
-  if (row.username.toLowerCase() === actorUsername.toLowerCase()
-    && (nextRole !== "admin" || nextStatus === "disabled")) {
-    throw new AccountProtectionError("目前登入的 ADMIN 不能停用或降級自己的帳號。");
+  if (row.role === "admin" && actor.role !== "root") {
+    throw new AccountProtectionError("ADMIN 彼此不能停用或變更角色；只有 ROOT 可以管理 ADMIN。");
   }
-  const removesAvailableAdmin = row.role === "admin"
-    && row.status !== "disabled"
-    && (nextRole !== "admin" || nextStatus === "disabled");
-  if (!removesAvailableAdmin) return;
-  const remaining = await database.prepare(
-    "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND status != 'disabled'",
-  ).first<{ count: number }>();
-  if ((remaining?.count ?? 0) <= 1) {
-    throw new AccountProtectionError("系統至少必須保留一個可使用的 ADMIN 帳號。");
+}
+
+function assertPasswordCanBeReset(row: StoredUserRow, actor: { username: string; role: AuthRole }) {
+  const isOwnAccount = row.username.toLowerCase() === actor.username.toLowerCase();
+  if (row.role === "admin" && actor.role !== "root" && !isOwnAccount) {
+    throw new AccountProtectionError("ADMIN 不能重設其他 ADMIN 的密碼；請由 ROOT 處理。");
   }
 }
 
@@ -272,12 +295,15 @@ export async function recordSignInEvent(database: Database, options: {
 }) {
   await ensureUsersTable(database);
   const normalizedUsername = options.username.trim().toLowerCase().slice(0, 80) || "unknown";
-  const user = await database.prepare("SELECT id, role FROM users WHERE username = ? COLLATE NOCASE LIMIT 1")
-    .bind(normalizedUsername)
-    .first<{ id: string; role: AuthRole }>();
+  const rootAttempt = isRootUsername(normalizedUsername);
+  const user = rootAttempt
+    ? null
+    : await database.prepare("SELECT id, role FROM users WHERE username = ? COLLATE NOCASE LIMIT 1")
+      .bind(normalizedUsername)
+      .first<{ id: string; role: AuthRole }>();
   await insertSignInEvent(database, {
     userId: user?.id,
-    userRole: user?.role,
+    userRole: rootAttempt ? "root" : user?.role,
     username: normalizedUsername,
     outcome: options.outcome,
     context: options.context,
@@ -301,17 +327,26 @@ async function unlockExpiredAccounts(database: Database) {
 export async function listUsers(database: Database) {
   await ensureUsersTable(database);
   await unlockExpiredAccounts(database);
-  const result = await database.prepare(
-    `SELECT id, name, username, role, status, password_hash, password_salt,
-      password_iterations, force_password_change, last_login_at, created_by, created_at, updated_at
-    FROM users
-    ORDER BY CASE role WHEN 'admin' THEN 1 WHEN 'supervisor' THEN 2 WHEN 'userpro' THEN 3 ELSE 4 END, created_at ASC`,
-  ).all<StoredUserRow>();
-  return result.results.map(publicUser);
+  const [result, rootLastLogin] = await Promise.all([
+    database.prepare(
+      `SELECT id, name, username, role, status, password_hash, password_salt,
+        password_iterations, force_password_change, last_login_at, created_by, created_at, updated_at
+      FROM users
+      WHERE username != ? COLLATE NOCASE
+      ORDER BY CASE role WHEN 'admin' THEN 1 WHEN 'supervisor' THEN 2 WHEN 'userpro' THEN 3 ELSE 4 END, created_at ASC`,
+    ).bind(ROOT_USERNAME).all<StoredUserRow>(),
+    database.prepare(
+      `SELECT created_at FROM sign_in_events
+      WHERE username = ? COLLATE NOCASE AND success = 1
+      ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    ).bind(ROOT_USERNAME).first<{ created_at: string }>(),
+  ]);
+  return [systemRootUser(rootLastLogin?.created_at ?? null), ...result.results.map(publicUser)];
 }
 
 export async function getStoredUserAccess(database: Database, username: string) {
   await ensureUsersTable(database);
+  if (isRootUsername(username)) return systemRootUser();
   const row = await database.prepare(
     `SELECT id, name, username, role, status, password_hash, password_salt,
       password_iterations, force_password_change, last_login_at, created_by, created_at, updated_at
@@ -328,6 +363,7 @@ export async function authenticateStoredUser(
 ) {
   await ensureUsersTable(database);
   const normalizedUsername = username.trim().toLowerCase();
+  if (isRootUsername(normalizedUsername)) return null;
   const row = await database.prepare(
     `SELECT id, name, username, role, status, password_hash, password_salt,
       password_iterations, force_password_change, last_login_at, created_by, created_at, updated_at
@@ -427,6 +463,9 @@ export async function createStoredUser(database: Database, options: {
 }) {
   await ensureUsersTable(database);
   const normalizedUsername = options.username.trim().toLowerCase();
+  if (isRootUsername(normalizedUsername) || options.role === "root") {
+    throw new ReservedUsernameError();
+  }
   const existing = await database.prepare("SELECT id FROM users WHERE username = ? COLLATE NOCASE LIMIT 1")
     .bind(normalizedUsername)
     .first<{ id: string }>();
@@ -479,10 +518,13 @@ export async function createStoredUser(database: Database, options: {
 export async function resetStoredUserPassword(database: Database, options: {
   userId: string;
   password: string;
+  actorUsername: string;
+  actorRole: AuthRole;
   audit: AuditContext;
 }) {
   await ensureUsersTable(database);
   const row = await findUserById(database, options.userId);
+  assertPasswordCanBeReset(row, { username: options.actorUsername, role: options.actorRole });
   const credential = await createPasswordCredential(options.password);
   await database.batch([database.prepare(
     `UPDATE users
@@ -505,11 +547,12 @@ export async function updateStoredUserStatus(database: Database, options: {
   userId: string;
   status: "active" | "disabled";
   actorUsername: string;
+  actorRole: AuthRole;
   audit: AuditContext;
 }) {
   await ensureUsersTable(database);
   const row = await findUserById(database, options.userId);
-  await assertAdminCanBeChanged(database, row, row.role, options.status, options.actorUsername);
+  assertAccountRoleOrStatusCanBeChanged(row, { username: options.actorUsername, role: options.actorRole });
   await database.batch([database.prepare(
     "UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
   ).bind(options.status, options.userId), prepareAuditEvent(database, {
@@ -529,11 +572,13 @@ export async function updateStoredUserRole(database: Database, options: {
   userId: string;
   role: AuthRole;
   actorUsername: string;
+  actorRole: AuthRole;
   audit: AuditContext;
 }) {
   await ensureUsersTable(database);
   const row = await findUserById(database, options.userId);
-  await assertAdminCanBeChanged(database, row, options.role, row.status, options.actorUsername);
+  if (options.role === "root") throw new ReservedUsernameError();
+  assertAccountRoleOrStatusCanBeChanged(row, { username: options.actorUsername, role: options.actorRole });
   await database.batch([database.prepare(
     "UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
   ).bind(options.role, options.userId), prepareAuditEvent(database, {
