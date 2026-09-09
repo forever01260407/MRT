@@ -95,6 +95,20 @@ type ManualEntryFeedback = {
   message: string;
 };
 
+type MySubmission = {
+  id: string;
+  record: LubricationRecord;
+  status: "有效" | "已更正" | "已失效";
+  createdAt: string;
+  editableUntil: string;
+  canEdit: boolean;
+};
+
+type MySubmissionsState = {
+  status: "loading" | "success" | "error";
+  message: string;
+};
+
 type AxleSettingsForm = {
   deviceId: string;
   effectiveDate: string;
@@ -325,6 +339,26 @@ function formatMeasurementTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value.slice(0, 10);
   return new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric" }).format(date);
+}
+
+function formatSubmissionTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-TW", {
+    timeZone: "Asia/Taipei",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function editWindowLabel(editableUntil: string, now: number) {
+  const remainingMs = Date.parse(editableUntil) - now;
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return "已鎖定";
+  const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+  return `尚可修改 ${minutes} 分鐘`;
 }
 
 async function sha256Hex(file: File) {
@@ -623,7 +657,9 @@ function HistoryChart({ devices, expanded = false }: { devices: Device[]; expand
 
 export default function Home() {
   const { user: signedInUser, loading: authLoading } = useAuthSession();
-  const canUseSupervisorTools = !authLoading && (signedInUser?.role === "supervisor" || signedInUser?.role === "admin");
+  const canImportExcel = !authLoading && (signedInUser?.role === "userpro" || signedInUser?.role === "supervisor" || signedInUser?.role === "admin");
+  const canConfigureAxle = !authLoading && (signedInUser?.role === "supervisor" || signedInUser?.role === "admin");
+  const canOpenMonitor = !authLoading && (signedInUser?.role === "userpro" || signedInUser?.role === "supervisor" || signedInUser?.role === "admin");
   const topologyRef = useRef<HTMLDivElement>(null);
   const expandedTopologyRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
@@ -647,6 +683,7 @@ export default function Home() {
   const [mapViewport, setMapViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [isChartExpanded, setIsChartExpanded] = useState(false);
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
+  const [editingSubmission, setEditingSubmission] = useState<MySubmission | null>(null);
   const [isAxleSettingsOpen, setIsAxleSettingsOpen] = useState(false);
   const [manualEntry, setManualEntry] = useState<ManualEntryForm>(() => ({
     deviceId: "",
@@ -678,6 +715,39 @@ export default function Home() {
     status: "loading",
     message: "正在從 D1 永久資料庫讀取潤滑紀錄…",
   });
+  const [mySubmissions, setMySubmissions] = useState<MySubmission[]>([]);
+  const [mySubmissionsState, setMySubmissionsState] = useState<MySubmissionsState>({
+    status: "loading",
+    message: "正在讀取最近 8 小時的提交紀錄…",
+  });
+  const [submissionClock, setSubmissionClock] = useState(Date.now);
+
+  const loadMySubmissions = useCallback(async () => {
+    setMySubmissionsState({ status: "loading", message: "正在讀取最近 8 小時的提交紀錄…" });
+    try {
+      const response = await fetch("/api/lubrication?view=my-submissions", { cache: "no-store" });
+      const payload = await response.json() as { submissions?: MySubmission[]; error?: string };
+      if (!response.ok || !payload.submissions) throw new Error(payload.error ?? "無法讀取我的近期提交。");
+      setMySubmissions(payload.submissions);
+      setMySubmissionsState({
+        status: "success",
+        message: payload.submissions.length ? `共 ${payload.submissions.length} 筆本人提交。` : "最近 8 小時尚未提交現場紀錄。",
+      });
+    } catch (error) {
+      setMySubmissionsState({ status: "error", message: error instanceof Error ? error.message : "無法讀取我的近期提交。" });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (authLoading || !signedInUser) return;
+    const timer = window.setTimeout(() => void loadMySubmissions(), 0);
+    return () => window.clearTimeout(timer);
+  }, [authLoading, loadMySubmissions, signedInUser]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setSubmissionClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const syncRecordsToDashboard = useCallback((records: LubricationRecord[]) => {
     const nextSegments = applyImportedRecords(segments, records);
@@ -1057,6 +1127,7 @@ export default function Home() {
   };
 
   const openManualEntry = () => {
+    setEditingSubmission(null);
     setManualEntry({
       deviceId: selectedDevice?.id ?? manualDeviceOptions[0] ?? "",
       oilLevel: selectedDevice && hasDeviceData(selectedDevice) ? String(selectedDevice.value) : "",
@@ -1069,9 +1140,29 @@ export default function Home() {
     setIsManualEntryOpen(true);
   };
 
+  const openSubmissionEdit = (submission: MySubmission) => {
+    if (!submission.canEdit || Date.parse(submission.editableUntil) <= submissionClock) {
+      setMySubmissionsState({ status: "error", message: "這筆紀錄已超過 30 分鐘修改期限，請聯絡 AD USER 協助更正。" });
+      setMySubmissions((current) => current.map((item) => item.id === submission.id ? { ...item, canEdit: false } : item));
+      return;
+    }
+    setEditingSubmission(submission);
+    setManualEntry({
+      deviceId: submission.record.deviceId,
+      oilLevel: String(submission.record.oilLevel),
+      measuredDate: submission.record.measuredAt.slice(0, 10),
+      inspector: signedInUser?.name || signedInUser?.username || submission.record.inspector,
+      recordType: submission.record.recordType,
+      refillAmount: submission.record.refillAmount === null ? "" : String(submission.record.refillAmount),
+    });
+    setManualEntryFeedback({ status: "idle", message: "儲存後會保留修改前後內容、操作者、時間與 IP。" });
+    setIsManualEntryOpen(true);
+  };
+
   const closeManualEntry = () => {
     if (manualEntryFeedback.status === "saving") return;
     setIsManualEntryOpen(false);
+    setEditingSubmission(null);
     window.requestAnimationFrame(() => manualEntryTriggerRef.current?.focus());
   };
 
@@ -1096,29 +1187,33 @@ export default function Home() {
       refillAmount: manualEntry.recordType === "補油" ? Number(refillAmount!.toFixed(2)) : null,
     };
 
-    setManualEntryFeedback({ status: "saving", message: "正在寫入 D1 並更新監測畫面…" });
+    setManualEntryFeedback({ status: "saving", message: editingSubmission ? "正在保存更正版本與操作紀錄…" : "正在寫入 D1 並更新監測畫面…" });
     try {
       const response = await fetch("/api/lubrication", {
-        method: "POST",
+        method: editingSubmission ? "PATCH" : "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          submissionType: "manual",
+        body: JSON.stringify(editingSubmission ? {
+          measurementId: editingSubmission.id,
+          correctionReason: "提交後 30 分鐘內由建立者自行修正",
           record,
-        }),
+        } : { submissionType: "manual", record }),
       });
       const payload = await response.json() as {
         records?: LubricationRecord[];
+        dashboardRecords?: LubricationRecord[];
+        mySubmissions?: MySubmission[];
         insertedCount?: number;
         duplicateCount?: number;
         error?: string;
         details?: string[];
         conflicts?: string[];
       };
-      if (!response.ok || !payload.records) {
+      if (!response.ok || (editingSubmission ? !payload.dashboardRecords : !payload.records)) {
         throw new LubricationImportError(payload.conflicts ?? payload.details ?? [payload.error ?? "現場紀錄無法寫入永久資料庫。"]);
       }
 
-      const latestRecord = syncRecordsToDashboard(payload.records);
+      const dashboardRecords = editingSubmission ? payload.dashboardRecords! : payload.records!;
+      const latestRecord = syncRecordsToDashboard(dashboardRecords);
       const targetSegment = activeSegments.find((segment) => segment.devices.some((device) => device.id === record.deviceId));
       if (targetSegment) {
         setSelectedSegmentId(targetSegment.id);
@@ -1127,20 +1222,29 @@ export default function Home() {
       }
       setExcelImport({
         status: "success",
-        message: `D1 永久資料庫已同步 ${payload.records.length} 筆紀錄。新的 Excel 會只新增尚未存在的資料。`,
-        recordCount: payload.records.length,
-        deviceCount: new Set(payload.records.map((item) => item.deviceId)).size,
+        message: `D1 永久資料庫已同步 ${dashboardRecords.length} 筆紀錄。新的 Excel 會只新增尚未存在的資料。`,
+        recordCount: dashboardRecords.length,
+        deviceCount: new Set(dashboardRecords.map((item) => item.deviceId)).size,
         insertedCount: payload.insertedCount ?? 0,
         duplicateCount: payload.duplicateCount ?? 0,
         latestMeasuredAt: latestRecord?.measuredAt,
       });
       setManualEntryFeedback({
         status: "success",
-        message: (payload.insertedCount ?? 0) > 0
+        message: editingSubmission
+          ? `${record.deviceId}｜${manualEntry.measuredDate} 已保存更正版本與 LOG。`
+          : (payload.insertedCount ?? 0) > 0
           ? `${record.deviceId}｜${manualEntry.measuredDate} ${record.recordType}紀錄已同步。`
           : `${record.deviceId}｜${manualEntry.measuredDate} 的相同紀錄已存在，未重複寫入。`,
       });
+      if (payload.mySubmissions) {
+        setMySubmissions(payload.mySubmissions);
+        setMySubmissionsState({ status: "success", message: `共 ${payload.mySubmissions.length} 筆本人提交。` });
+      } else {
+        void loadMySubmissions();
+      }
       setIsManualEntryOpen(false);
+      setEditingSubmission(null);
       window.requestAnimationFrame(() => manualEntryTriggerRef.current?.focus());
     } catch (error) {
       const details = error instanceof LubricationImportError
@@ -1496,31 +1600,31 @@ export default function Home() {
           </div>
           <div className="page-heading-side">
             <div className="updated-at">資料時間 <strong>{excelImport.latestMeasuredAt ? formatMeasurementTime(excelImport.latestMeasuredAt) : "讀取中"}</strong></div>
-            {canUseSupervisorTools ? (
+            {canConfigureAxle || canOpenMonitor ? (
               <div className="page-heading-tools">
-                <button
-                  type="button"
-                  className="mini-axle-settings-button"
-                  ref={axleSettingsTriggerRef}
-                  onClick={openAxleSettings}
-                  aria-haspopup="dialog"
-                >
-                  <span className="mini-axle-settings-icon" aria-hidden="true">軸</span>
-                  <span><strong>階軸設定</strong><small>設定潤滑站點階數與軸數</small></span>
-                  <b aria-hidden="true">＋</b>
-                </button>
-                <a className="mini-monitor-link" href="/monitor">
+                {canConfigureAxle ? <button
+                    type="button"
+                    className="mini-axle-settings-button"
+                    ref={axleSettingsTriggerRef}
+                    onClick={openAxleSettings}
+                    aria-haspopup="dialog"
+                  >
+                    <span className="mini-axle-settings-icon" aria-hidden="true">軸</span>
+                    <span><strong>階軸設定</strong><small>設定潤滑站點階數與軸數</small></span>
+                    <b aria-hidden="true">＋</b>
+                  </button> : null}
+                {canOpenMonitor ? <a className="mini-monitor-link" href="/monitor">
                   <span className="mini-monitor-dot" aria-hidden="true"></span>
                   <span><strong>Monitor Area</strong><small>查看全部紀錄與更正歷程</small></span>
                   <b aria-hidden="true">→</b>
-                </a>
+                </a> : null}
               </div>
             ) : null}
           </div>
         </div>
 
-        <div className="data-entry-grid">
-          <section className={`excel-import-panel ${excelImport.status}`} aria-labelledby="excel-import-title">
+        <div className={`data-entry-grid ${canImportExcel ? "" : "single"}`}>
+          {canImportExcel ? <section className={`excel-import-panel ${excelImport.status}`} aria-labelledby="excel-import-title">
             <div className="excel-import-icon" aria-hidden="true"><span>XL</span></div>
             <div className="excel-import-copy">
               <span className="panel-kicker">LUBRICATION DATA IMPORT</span>
@@ -1541,7 +1645,7 @@ export default function Home() {
               <span>{excelImport.message}</span>
               {excelImport.errors?.length ? <ul>{excelImport.errors.map((error) => <li key={error}>{error}</li>)}</ul> : null}
             </div>
-          </section>
+          </section> : null}
 
           <section className={`manual-entry-panel ${manualEntryFeedback.status}`} aria-labelledby="manual-entry-panel-title">
             <div className="manual-entry-icon" aria-hidden="true">＋</div>
@@ -1563,6 +1667,44 @@ export default function Home() {
             </div>
           </section>
         </div>
+
+        <section className={`my-submissions-panel ${mySubmissionsState.status}`} aria-labelledby="my-submissions-title">
+          <header>
+            <div>
+              <span className="panel-kicker">MY RECENT SUBMISSIONS</span>
+              <h3 id="my-submissions-title">我的近期提交</h3>
+              <p>只顯示目前登入帳號最近 8 小時的現場登記；送出後 30 分鐘內可自行修改。</p>
+            </div>
+            <button type="button" onClick={() => void loadMySubmissions()} disabled={mySubmissionsState.status === "loading"}>
+              {mySubmissionsState.status === "loading" ? "同步中…" : "重新整理"}
+            </button>
+          </header>
+          {mySubmissions.length ? (
+            <div className="my-submissions-table-wrap">
+              <table className="my-submissions-table">
+                <thead><tr><th>提交時間</th><th>設備／日期</th><th>內容</th><th>修改狀態</th><th><span className="visually-hidden">操作</span></th></tr></thead>
+                <tbody>{mySubmissions.map((submission) => {
+                  const isEditable = submission.canEdit && Date.parse(submission.editableUntil) > submissionClock;
+                  return <tr key={submission.id}>
+                    <td><time dateTime={submission.createdAt}>{formatSubmissionTime(submission.createdAt)}</time></td>
+                    <td><strong>{formatLubricationDeviceId(submission.record.deviceId)}</strong><small>{submission.record.measuredAt.slice(0, 10)}</small></td>
+                    <td><strong>{submission.record.oilLevel.toFixed(2)} L</strong><small>{submission.record.recordType}{submission.record.refillAmount === null ? "" : ` · 補油 ${submission.record.refillAmount.toFixed(2)} L`}</small></td>
+                    <td><span className={isEditable ? "editable" : "locked"}>{editWindowLabel(submission.editableUntil, submissionClock)}</span><small>{submission.status}</small></td>
+                    <td>{isEditable
+                      ? <button type="button" className="edit" onClick={() => openSubmissionEdit(submission)}>修改</button>
+                      : <span className="contact-ad-user">請洽 AD USER</span>}</td>
+                  </tr>;
+                })}</tbody>
+              </table>
+            </div>
+          ) : (
+            <div className={`my-submissions-empty ${mySubmissionsState.status}`} role="status">
+              <strong>{mySubmissionsState.status === "error" ? "近期提交讀取失敗" : "目前沒有近期提交"}</strong>
+              <p>{mySubmissionsState.message}</p>
+            </div>
+          )}
+          {mySubmissions.length ? <p className={`my-submissions-status ${mySubmissionsState.status}`} role="status">{mySubmissionsState.message}</p> : null}
+        </section>
 
         <section className="summary-grid" aria-label="全線摘要">
           <article className="summary-card danger-card"><span>需處理設備</span><strong>{criticalCount}</strong><small>優先安排現場複查</small></article>
@@ -1989,9 +2131,9 @@ export default function Home() {
             >
               <header className="manual-entry-modal-header">
                 <div>
-                  <span className="panel-kicker">ON-SITE MEASUREMENT</span>
-                  <h3 id="manual-entry-title"><span aria-hidden="true">＋</span>手動登記現場量測值</h3>
-                  <p id="manual-entry-description">資料會立即寫入 D1，現場人員由目前登入帳號自動帶入。</p>
+                  <span className="panel-kicker">{editingSubmission ? "EDIT MY SUBMISSION" : "ON-SITE MEASUREMENT"}</span>
+                  <h3 id="manual-entry-title"><span aria-hidden="true">{editingSubmission ? "✎" : "＋"}</span>{editingSubmission ? "修改我的近期提交" : "手動登記現場量測值"}</h3>
+                  <p id="manual-entry-description">{editingSubmission ? "僅限提交後 30 分鐘內；儲存時會新增更正版本並保留完整 LOG。" : "資料會立即寫入 D1，現場人員由目前登入帳號自動帶入。"}</p>
                 </div>
                 <button
                   type="button"
@@ -2098,7 +2240,7 @@ export default function Home() {
                 <footer className="manual-entry-form-actions">
                   <button type="button" className="manual-entry-cancel" onClick={closeManualEntry} disabled={manualEntryFeedback.status === "saving"}>取消</button>
                   <button type="submit" className="manual-entry-submit" disabled={manualEntryFeedback.status === "saving"}>
-                    {manualEntryFeedback.status === "saving" ? "同步中…" : "確認登錄並即時同步"}
+                    {manualEntryFeedback.status === "saving" ? "同步中…" : editingSubmission ? "儲存修改並保留 LOG" : "確認登錄並即時同步"}
                   </button>
                 </footer>
               </form>

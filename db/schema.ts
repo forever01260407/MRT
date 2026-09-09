@@ -124,7 +124,7 @@ export const users = sqliteTable("users", {
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   uniqueIndex("users_username_uidx").on(table.username),
-  check("users_role_valid", sql`${table.role} IN ('user', 'supervisor', 'admin')`),
+  check("users_role_valid", sql`${table.role} IN ('user', 'userpro', 'supervisor', 'admin')`),
   check("users_status_valid", sql`${table.status} IN ('active', 'pending', 'locked', 'disabled')`),
   check("users_password_iterations_positive", sql`${table.passwordIterations} > 0`),
 ]);

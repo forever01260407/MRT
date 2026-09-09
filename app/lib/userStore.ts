@@ -66,7 +66,7 @@ const USERS_TABLE_SQL = `CREATE TABLE IF NOT EXISTS users (
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT users_role_valid CHECK(role IN ('user', 'supervisor', 'admin')),
+  CONSTRAINT users_role_valid CHECK(role IN ('user', 'userpro', 'supervisor', 'admin')),
   CONSTRAINT users_status_valid CHECK(status IN ('active', 'pending', 'locked', 'disabled')),
   CONSTRAINT users_force_password_change_valid CHECK(force_password_change IN (0, 1)),
   CONSTRAINT users_password_iterations_positive CHECK(password_iterations > 0)
@@ -305,7 +305,7 @@ export async function listUsers(database: Database) {
     `SELECT id, name, username, role, status, password_hash, password_salt,
       password_iterations, force_password_change, last_login_at, created_by, created_at, updated_at
     FROM users
-    ORDER BY CASE role WHEN 'admin' THEN 1 WHEN 'supervisor' THEN 2 ELSE 3 END, created_at ASC`,
+    ORDER BY CASE role WHEN 'admin' THEN 1 WHEN 'supervisor' THEN 2 WHEN 'userpro' THEN 3 ELSE 4 END, created_at ASC`,
   ).all<StoredUserRow>();
   return result.results.map(publicUser);
 }

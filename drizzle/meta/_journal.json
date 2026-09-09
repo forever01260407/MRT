@@ -64,6 +64,13 @@
       "when": 1788892761574,
       "tag": "0008_lying_slayback",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1788898583529,
+      "tag": "0009_glorious_maggott",
+      "breakpoints": true
     }
   ]
 }

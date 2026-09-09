@@ -8,7 +8,7 @@ import type { RoleCode } from "../lib/rolePresentation";
 type SessionUser = {
   username: string;
   name: string;
-  role: Exclude<RoleCode, "userpro">;
+  role: RoleCode;
   expiresAt: number;
 };
 

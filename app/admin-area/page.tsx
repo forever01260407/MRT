@@ -28,7 +28,7 @@ type StoredApiUser = {
   id: string;
   name: string;
   username: string;
-  role: Exclude<UserRole, "userpro">;
+  role: UserRole;
   status: UserStatus;
   lastLoginAt: string | null;
   createdBy: string;
@@ -95,12 +95,14 @@ const statusLabels: Record<UserStatus, string> = {
 };
 
 const permissions = [
-  { label: "查看監測總覽", group: "監測", user: true, userpro: false, supervisor: true, admin: true },
-  { label: "登記現場量測", group: "資料", user: true, userpro: false, supervisor: true, admin: true },
-  { label: "匯入 Excel 資料", group: "資料", user: false, userpro: false, supervisor: true, admin: true },
-  { label: "更正量測紀錄", group: "資料", user: false, userpro: false, supervisor: true, admin: true },
+  { label: "查看監測總覽", group: "監測", user: true, userpro: true, supervisor: true, admin: true },
+  { label: "查看完整資料紀錄", group: "監測", user: false, userpro: true, supervisor: true, admin: true },
+  { label: "登記現場量測", group: "資料", user: true, userpro: true, supervisor: true, admin: true },
+  { label: "修改自己 30 分鐘內的提交", group: "資料", user: true, userpro: true, supervisor: true, admin: true },
+  { label: "匯入 Excel 資料", group: "資料", user: false, userpro: true, supervisor: true, admin: true },
+  { label: "更正任意量測紀錄", group: "資料", user: false, userpro: true, supervisor: true, admin: true },
   { label: "設定設備階軸", group: "設備", user: false, userpro: false, supervisor: true, admin: true },
-  { label: "軟刪除紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true },
+  { label: "軟刪除紀錄", group: "高風險", user: false, userpro: true, supervisor: true, admin: true },
   { label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true },
   { label: "管理人員與角色", group: "管理", user: false, userpro: false, supervisor: false, admin: true },
   { label: "查看完整操作紀錄", group: "管理", user: false, userpro: false, supervisor: false, admin: true },
@@ -342,6 +344,7 @@ export default function AdminAreaPage() {
   const activeUsers = users.filter((user) => user.status === "active").length;
   const attentionUsers = users.filter((user) => user.status === "locked" || user.status === "disabled");
   const userCount = users.filter((user) => user.role === "user" && user.status !== "disabled").length;
+  const userproCount = users.filter((user) => user.role === "userpro" && user.status !== "disabled").length;
   const supervisorCount = users.filter((user) => user.role === "supervisor" && user.status !== "disabled").length;
   const adminCount = users.filter((user) => user.role === "admin" && user.status !== "disabled").length;
   const activeSessions = users.reduce((sum, user) => sum + user.sessions, 0);
@@ -474,7 +477,7 @@ export default function AdminAreaPage() {
   };
 
   const changeSelectedUserRole = async (role: UserRole) => {
-    if (!selectedUser || role === "userpro" || role === selectedUser.role || accountAction) return;
+    if (!selectedUser || role === selectedUser.role || accountAction) return;
     setAccountAction("role");
     setAccountActionError("");
     try {
@@ -625,7 +628,7 @@ export default function AdminAreaPage() {
               <section className="admin-panel admin-users-panel" aria-labelledby="users-table-title">
                 <div className="admin-toolbar">
                   <label className="admin-search"><span className="visually-hidden">搜尋帳號</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜尋姓名、帳號或編號" /></label>
-                  <label><span>角色</span><select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as UserRole | "all")}><option value="all">全部角色</option><option value="user">USER</option><option value="userpro" disabled>AD USER（未啟用）</option><option value="supervisor">POWER USER</option><option value="admin">ADMIN</option></select></label>
+                  <label><span>角色</span><select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as UserRole | "all")}><option value="all">全部角色</option><option value="user">USER</option><option value="userpro">AD USER</option><option value="supervisor">POWER USER</option><option value="admin">ADMIN</option></select></label>
                   <label><span>狀態</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as UserStatus | "all")}><option value="all">全部狀態</option><option value="active">使用中</option><option value="locked">已鎖定</option><option value="disabled">已停用</option></select></label>
                   <span className="admin-result-count">{filteredUsers.length} / {users.length} 人</span>
                 </div>
@@ -655,7 +658,7 @@ export default function AdminAreaPage() {
               <div className="admin-section-stack">
                 <section className="admin-role-overview" aria-label="角色摘要">
                   <article className="user"><span>U</span><div><strong className="role-display-badge user">USER</strong><small>一般查詢與現場登記</small></div><b>{userCount} 人</b></article>
-                  <article className="userpro paused"><span>AD</span><div><strong className="role-display-badge userpro">AD USER</strong><small>暫不開放指派</small></div><b>未啟用</b></article>
+                  <article className="userpro"><span>AD</span><div><strong className="role-display-badge userpro">AD USER</strong><small>匯入、更正與軟刪除</small></div><b>{userproCount} 人</b></article>
                   <article className="supervisor"><span>P</span><div><strong className="role-display-badge supervisor">POWER USER</strong><small>進階資料操作</small></div><b>{supervisorCount} 人</b></article>
                   <article className="admin"><span>A</span><div><strong className="role-display-badge admin">ADMIN</strong><small>系統與帳號管理</small></div><b>{adminCount} 人</b></article>
                 </section>
@@ -663,11 +666,11 @@ export default function AdminAreaPage() {
                   <header className="admin-panel-heading"><div><span className="panel-kicker">PERMISSION MATRIX</span><h3 id="permission-title">功能權限矩陣</h3></div><span className="admin-readonly-badge">第一版固定角色</span></header>
                   <div className="admin-table-wrap">
                     <table className="admin-table permission-table">
-                      <thead><tr><th>功能</th><th>分類</th>{permissionRoles.map((role) => <th key={role} className={role === "userpro" ? "muted-role" : ""}><span className={`role-display-badge ${role}`}>{getRoleDisplayLabel(role)}</span></th>)}</tr></thead>
-                      <tbody>{permissions.map((permission) => <tr key={permission.label}><td><strong>{permission.label}</strong></td><td><span className="admin-permission-group">{permission.group}</span></td>{permissionRoles.map((role) => <td key={role} className={role === "userpro" ? "muted-role" : ""}><span className={permission[role] ? "permission-yes" : "permission-no"}>{permission[role] ? "✓" : "—"}</span></td>)}</tr>)}</tbody>
+                      <thead><tr><th>功能</th><th>分類</th>{permissionRoles.map((role) => <th key={role}><span className={`role-display-badge ${role}`}>{getRoleDisplayLabel(role)}</span></th>)}</tr></thead>
+                      <tbody>{permissions.map((permission) => <tr key={permission.label}><td><strong>{permission.label}</strong></td><td><span className="admin-permission-group">{permission.group}</span></td>{permissionRoles.map((role) => <td key={role}><span className={permission[role] ? "permission-yes" : "permission-no"}>{permission[role] ? "✓" : "—"}</span></td>)}</tr>)}</tbody>
                     </table>
                   </div>
-                  <p className="admin-panel-footnote"><strong>AD USER</strong> 目前只保留名稱，不會出現在新增帳號的可選角色中。</p>
+                  <p className="admin-panel-footnote"><strong>USER</strong> 只能在「我的近期提交」修改本人 30 分鐘內的現場紀錄；逾時須由 AD USER 以上角色更正。</p>
                 </section>
               </div>
             ) : null}
@@ -743,7 +746,7 @@ export default function AdminAreaPage() {
             <header><div><span className="panel-kicker">CREATE ACCOUNT</span><h3 id="create-account-title">新增人員帳號</h3><p>帳號名稱與登入名稱相同，建立後可直接登入。</p></div><button type="button" onClick={() => setIsCreateOpen(false)} aria-label="關閉新增帳號視窗">×</button></header>
             <form onSubmit={createUser}>
               <label><span>登入帳號／顯示名稱 <b>*</b></span><input name="username" autoFocus required placeholder="例如：operator01" autoComplete="off" /></label>
-              <label><span>角色 <b>*</b></span><select name="role" defaultValue="user"><option value="user">USER－一般操作</option><option value="userpro" disabled>AD USER－尚未啟用</option><option value="supervisor">POWER USER－進階資料操作</option><option value="admin">ADMIN－系統與帳號管理</option></select></label>
+              <label><span>角色 <b>*</b></span><select name="role" defaultValue="user"><option value="user">USER－一般操作</option><option value="userpro">AD USER－匯入、更正與軟刪除</option><option value="supervisor">POWER USER－階軸設定與資料還原</option><option value="admin">ADMIN－系統與帳號管理</option></select></label>
               <label><span>登入密碼 <b>*</b></span><input name="password" type="password" required placeholder="由 ADMIN 自行設定" autoComplete="new-password" /></label>
               {formError ? <div className="admin-form-error" role="alert">{formError}</div> : null}
               <p className="admin-local-note">帳號會儲存至本機 D1；建立完成後可立即登入，重新整理也會保留。</p>
@@ -759,7 +762,7 @@ export default function AdminAreaPage() {
             <header><div><span className={`admin-user-avatar large ${selectedUser.role}`} aria-hidden="true">{userInitials(selectedUser.name)}</span><div><span className="panel-kicker">{selectedUser.id}</span><h3 id="user-detail-title">{selectedUser.name}</h3><p>@{selectedUser.username}</p></div></div><button type="button" onClick={closeUser} disabled={Boolean(accountAction)} aria-label="關閉人員帳號詳情">×</button></header>
             <div className="admin-user-detail-body">
               <dl><div><dt>目前狀態</dt><dd><span className={`admin-status ${selectedUser.status}`}>{statusLabels[selectedUser.status]}</span></dd></div><div><dt>最後登入</dt><dd>{selectedUser.lastLogin}</dd></div><div><dt>登入階段</dt><dd>{selectedUser.sessions} 個</dd></div><div><dt>建立日期</dt><dd>{selectedUser.createdAt}</dd></div></dl>
-              <label><span>角色</span><select value={selectedUser.role} onChange={(event) => void changeSelectedUserRole(event.target.value as UserRole)} disabled={selectedUser.username === authenticatedUser?.username || Boolean(accountAction)}><option value="user">USER</option><option value="userpro" disabled>AD USER（未啟用）</option><option value="supervisor">POWER USER</option><option value="admin">ADMIN</option></select><small>{selectedUser.username === authenticatedUser?.username ? "目前登入的 ADMIN 不能降級自己的帳號。" : "選擇後會立即更新此人的系統權限。"}</small></label>
+              <label><span>角色</span><select value={selectedUser.role} onChange={(event) => void changeSelectedUserRole(event.target.value as UserRole)} disabled={selectedUser.username === authenticatedUser?.username || Boolean(accountAction)}><option value="user">USER</option><option value="userpro">AD USER</option><option value="supervisor">POWER USER</option><option value="admin">ADMIN</option></select><small>{selectedUser.username === authenticatedUser?.username ? "目前登入的 ADMIN 不能降級自己的帳號。" : "選擇後會立即更新此人的系統權限。"}</small></label>
               <div className="admin-user-actions"><button type="button" onClick={() => { setResetPasswordOpen((current) => !current); setAccountActionError(""); }} disabled={Boolean(accountAction)}>{resetPasswordOpen ? "取消重設" : "重設密碼"}</button><button type="button" className={selectedUser.status === "disabled" || selectedUser.status === "locked" ? "success" : "danger"} onClick={() => void toggleSelectedUserStatus()} disabled={selectedUser.username === authenticatedUser?.username || Boolean(accountAction)}>{accountAction === "status" ? "處理中…" : selectedUser.status === "disabled" || selectedUser.status === "locked" ? "啟用帳號" : "停用帳號"}</button></div>
               {resetPasswordOpen ? <form className="admin-reset-password-form" onSubmit={resetSelectedUserPassword}><strong>設定新的登入密碼</strong><label><span>新密碼</span><input name="newPassword" type="password" required autoFocus autoComplete="new-password" /></label><label><span>再次輸入新密碼</span><input name="confirmPassword" type="password" required autoComplete="new-password" /></label><small>不限制長度或字元組合；儲存後舊密碼立即失效。</small><button type="submit" className="admin-primary-button" disabled={Boolean(accountAction)}>{accountAction === "password" ? "儲存中…" : "儲存新密碼"}</button></form> : null}
               {accountActionError ? <div className="admin-form-error" role="alert">{accountActionError}</div> : null}

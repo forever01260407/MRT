@@ -9,6 +9,8 @@ import { getRequestAuditContext } from "../../lib/requestContext";
 
 const INITIAL_BATCH_ID = "initial-excel-2026-08-19";
 const MAX_IMPORT_RECORDS = 500;
+const USER_SELF_EDIT_WINDOW_MS = 30 * 60 * 1000;
+const MY_SUBMISSIONS_VISIBLE_WINDOW_MS = 8 * 60 * 60 * 1000;
 type StoredMeasurementRow = {
   id: string;
   device_id: string;
@@ -533,6 +535,38 @@ function buildMonitorPayload(allRecords: MonitoredLubricationRecord[]) {
   };
 }
 
+function storedTimestampMs(value: string) {
+  const timestamp = Date.parse(value.includes("T") ? value : `${value.replace(" ", "T")}Z`);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function buildMySubmissions(allRecords: MonitoredLubricationRecord[], username: string, now = Date.now()) {
+  const normalizedUsername = username.trim().toLowerCase();
+  return allRecords
+    .filter((item) => {
+      const createdAt = storedTimestampMs(item.createdAt);
+      return item.sourceType === "現場登記"
+        && item.createdBy.trim().toLowerCase() === normalizedUsername
+        && createdAt !== null
+        && createdAt <= now
+        && now - createdAt <= MY_SUBMISSIONS_VISIBLE_WINDOW_MS;
+    })
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .slice(0, 20)
+    .map((item) => {
+      const createdAt = storedTimestampMs(item.createdAt)!;
+      const editableUntil = createdAt + USER_SELF_EDIT_WINDOW_MS;
+      return {
+        id: item.id,
+        record: item.current,
+        status: item.status,
+        createdAt: new Date(createdAt).toISOString(),
+        editableUntil: new Date(editableUntil).toISOString(),
+        canEdit: !item.deletion && now <= editableUntil,
+      };
+    });
+}
+
 async function findExistingMeasurements(d1: D1Database) {
   const existing = new Map<string, LubricationRecord>();
   const monitored = await listMonitoredMeasurements(d1);
@@ -552,8 +586,23 @@ export async function GET(request: Request) {
   try {
     const d1 = await getD1();
     await ensureDatabase(d1);
-    if (new URL(request.url).searchParams.get("view") === "monitor") {
-      return Response.json(buildMonitorPayload(await listMonitoredMeasurements(d1)));
+    const view = new URL(request.url).searchParams.get("view");
+    if (view === "monitor" || view === "my-submissions") {
+      const actor = await getActiveRequestUser(request);
+      if (!actor) {
+        return Response.json({ error: "請先登入後再讀取紀錄。" }, { status: 401 });
+      }
+      const monitored = await listMonitoredMeasurements(d1);
+      if (view === "my-submissions") {
+        return Response.json(
+          { submissions: buildMySubmissions(monitored, actor.username) },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
+      if (actor.role === "user") {
+        return Response.json({ error: "只有 AD USER、POWER USER 或 ADMIN 可以查看完整資料紀錄。" }, { status: 403 });
+      }
+      return Response.json(buildMonitorPayload(monitored), { headers: { "Cache-Control": "no-store" } });
     }
     const [records, deviceAxleProfiles] = await Promise.all([
       listMeasurements(d1),
@@ -582,7 +631,7 @@ export async function POST(request: Request) {
     const requestBody = await request.json();
     const isManualEntry = isManualEntryPayload(requestBody);
     if (!isManualEntry && actor.role === "user") {
-      return Response.json({ error: "只有 POWER USER 或 ADMIN 可以匯入 Excel。" }, { status: 403 });
+      return Response.json({ error: "只有 AD USER、POWER USER 或 ADMIN 可以匯入 Excel。" }, { status: 403 });
     }
 
     const payload = isManualEntry
@@ -659,9 +708,13 @@ export async function POST(request: Request) {
       }),
     ]);
 
-    const records = await listMeasurements(d1);
+    const [records, monitored] = await Promise.all([
+      listMeasurements(d1),
+      listMonitoredMeasurements(d1),
+    ]);
     return Response.json({
       records,
+      mySubmissions: buildMySubmissions(monitored, actor.username),
       insertedCount: newRecords.length,
       duplicateCount,
       totalCount: records.length,
@@ -684,9 +737,6 @@ export async function PATCH(request: Request) {
     if (!actor) {
       return Response.json({ error: "請先登入後再更正紀錄。" }, { status: 401 });
     }
-    if (actor.role === "user") {
-      return Response.json({ error: "只有 POWER USER 或 ADMIN 可以更正紀錄。" }, { status: 403 });
-    }
     const payload = parseCorrectionPayload(await request.json());
     const d1 = await getD1();
     await ensureDatabase(d1);
@@ -695,17 +745,31 @@ export async function PATCH(request: Request) {
     if (!target) {
       return Response.json({ error: "找不到要更正的原始紀錄。" }, { status: 404 });
     }
-    if (recordsEqual(target.current, payload.record)) {
+    if (actor.role === "user") {
+      const createdAt = storedTimestampMs(target.createdAt);
+      const isOwnManualSubmission = target.sourceType === "現場登記"
+        && target.createdBy.trim().toLowerCase() === actor.username.trim().toLowerCase();
+      if (!isOwnManualSubmission) {
+        return Response.json({ error: "USER 只能修改自己建立的現場登記紀錄。" }, { status: 403 });
+      }
+      if (createdAt === null || Date.now() > createdAt + USER_SELF_EDIT_WINDOW_MS) {
+        return Response.json({ error: "這筆紀錄已超過 30 分鐘修改期限，請聯絡 AD USER 協助更正。" }, { status: 403 });
+      }
+    }
+    const correctedRecord = actor.role === "user"
+      ? { ...payload.record, inspector: actor.name }
+      : payload.record;
+    if (recordsEqual(target.current, correctedRecord)) {
       return Response.json({ error: "更正內容與目前有效資料完全相同，因此未新增版本。" }, { status: 400 });
     }
 
-    const incomingKey = recordKey(payload.record);
+    const incomingKey = recordKey(correctedRecord);
     const collision = monitored.find((item) => item.id !== target.id && (
       recordKey(item.original) === incomingKey || recordKey(item.current) === incomingKey
     ));
     if (collision) {
       return Response.json({
-        error: `${payload.record.deviceId}｜${payload.record.measuredAt.slice(0, 10)} 已屬於另一筆紀錄，請再確認設備與日期。`,
+        error: `${correctedRecord.deviceId}｜${correctedRecord.measuredAt.slice(0, 10)} 已屬於另一筆紀錄，請再確認設備與日期。`,
       }, { status: 409 });
     }
 
@@ -722,12 +786,12 @@ export async function PATCH(request: Request) {
         revisionId,
         target.id,
         revisionNo,
-        payload.record.deviceId,
-        payload.record.measuredAt,
-        payload.record.oilLevel,
-        payload.record.inspector,
-        payload.record.recordType,
-        payload.record.refillAmount,
+        correctedRecord.deviceId,
+        correctedRecord.measuredAt,
+        correctedRecord.oilLevel,
+        correctedRecord.inspector,
+        correctedRecord.recordType,
+        correctedRecord.refillAmount,
         payload.correctionReason,
         actor.name,
         actor.username,
@@ -741,17 +805,20 @@ export async function PATCH(request: Request) {
         action: "lubrication.measurement_corrected",
         resourceType: "measurement",
         resourceId: target.id,
-        resourceLabel: `${payload.record.deviceId}｜${payload.record.measuredAt.slice(0, 10)}`,
+        resourceLabel: `${correctedRecord.deviceId}｜${correctedRecord.measuredAt.slice(0, 10)}`,
         before: target.current,
-        after: { ...payload.record, revisionNo },
+        after: { ...correctedRecord, revisionNo },
         reason: payload.correctionReason,
         originType: "measurement_revision",
         originId: revisionId,
         occurredAt: createdAt,
       })]);
 
+    const refreshedMonitored = await listMonitoredMeasurements(d1);
     return Response.json({
-      ...buildMonitorPayload(await listMonitoredMeasurements(d1)),
+      ...buildMonitorPayload(refreshedMonitored),
+      dashboardRecords: await listMeasurements(d1),
+      mySubmissions: buildMySubmissions(refreshedMonitored, actor.username),
       correctedId: target.id,
     });
   } catch (error) {
@@ -772,7 +839,7 @@ export async function DELETE(request: Request) {
       return Response.json({ error: "請先登入後再刪除紀錄。" }, { status: 401 });
     }
     if (actor.role === "user") {
-      return Response.json({ error: "只有 POWER USER 或 ADMIN 可以刪除紀錄。" }, { status: 403 });
+      return Response.json({ error: "只有 AD USER、POWER USER 或 ADMIN 可以刪除紀錄。" }, { status: 403 });
     }
     const payload = parseDeletePayload(await request.json());
 
@@ -835,7 +902,7 @@ export async function PUT(request: Request) {
     if (!actor) {
       return Response.json({ error: "請先登入後再還原紀錄。" }, { status: 401 });
     }
-    if (actor.role === "user") {
+    if (actor.role === "user" || actor.role === "userpro") {
       return Response.json({ error: "只有 POWER USER 或 ADMIN 可以從垃圾桶還原紀錄。" }, { status: 403 });
     }
     const payload = parseRestorePayload(await request.json());

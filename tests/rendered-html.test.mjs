@@ -137,12 +137,15 @@ test("server-renders the rail lubrication monitoring dashboard", async () => {
   const html = await response.text();
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.match(html, /<title>環狀線鋼軌狀態監測中心<\/title>/i);
-  assert.match(html, /匯入潤滑設備 Excel/);
+  assert.match(page, /匯入潤滑設備 Excel/);
   assert.match(html, /現場登記/);
   assert.match(html, /登記現場量測/);
   assert.match(page, /Monitor Area/);
   assert.match(page, /階軸設定/);
-  assert.match(page, /canUseSupervisorTools \? \(/);
+  assert.match(page, /const canImportExcel/);
+  assert.match(page, /const canConfigureAxle/);
+  assert.match(page, /const canOpenMonitor/);
+  assert.match(page, /signedInUser\?\.role === "userpro"/);
   assert.match(page, /signedInUser\?\.role === "supervisor"/);
   assert.match(page, /signedInUser\?\.role === "admin"/);
   assert.doesNotMatch(html, /class="nav-item"[^>]*>Monitor 完整紀錄/);
@@ -286,8 +289,11 @@ test("server-renders the operational admin area framework", async () => {
   assert.match(page, /登入與安全/);
   assert.match(page, /登入有效時間/);
   assert.match(page, /8 小時後重新登入/);
-  assert.match(page, /AD USER（未啟用）/);
+  assert.match(page, /AD USER－匯入、更正與軟刪除/);
   assert.match(page, /功能權限矩陣/);
+  assert.match(page, /label: "查看完整資料紀錄", group: "監測", user: false, userpro: true, supervisor: true, admin: true/);
+  assert.match(page, /label: "修改自己 30 分鐘內的提交", group: "資料", user: true, userpro: true, supervisor: true, admin: true/);
+  assert.match(page, /label: "軟刪除紀錄", group: "高風險", user: false, userpro: true, supervisor: true, admin: true/);
   assert.match(page, /label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true/);
   assert.match(rolePresentation, /user: "USER"/);
   assert.match(rolePresentation, /userpro: "AD USER"/);
@@ -532,7 +538,7 @@ test("lets POWER USER and ADMIN move records to Trash and restore them", async (
   assert.match(page, /method: "DELETE"/);
   assert.match(page, /method: "PUT"/);
   assert.match(page, /🗑 垃圾桶（已刪除）/);
-  assert.match(page, /const canDelete = signedInUser\?\.role === "supervisor" \|\| signedInUser\?\.role === "admin"/);
+  assert.match(page, /const canDelete = signedInUser\?\.role === "userpro" \|\| signedInUser\?\.role === "supervisor" \|\| signedInUser\?\.role === "admin"/);
   assert.match(page, /const canRestore = signedInUser\?\.role === "supervisor" \|\| signedInUser\?\.role === "admin"/);
   assert.match(page, /已標註失效，並從總覽、圖表與統計中排除/);
   assert.doesNotMatch(page, /刪除密碼|deletePassword/);
@@ -549,7 +555,7 @@ test("lets POWER USER and ADMIN move records to Trash and restore them", async (
   assert.match(migration, /ALTER TABLE `device_axle_profile_events` ADD `source_ip`/);
   assert.match(proxy, /pathname === "\/api\/lubrication" && request\.method === "DELETE"/);
   assert.match(proxy, /pathname === "\/api\/lubrication" && request\.method === "PUT"/);
-  assert.match(proxy, /request\.method === "PUT" && effectiveSession\.role === "user"/);
+  assert.match(proxy, /effectiveSession\.role === "user" \|\| effectiveSession\.role === "userpro"/);
 
   const worker = await loadWorker();
   const userCookie = await login(worker, "user", "user");
@@ -633,7 +639,7 @@ test("stores corrections as immutable measurement revisions", async () => {
   assert.match(schema, /revisionNo/);
 });
 
-test("protects Excel imports with the signed-in supervisor or admin role", async () => {
+test("protects Excel imports with the signed-in AD USER, POWER USER, or ADMIN role", async () => {
   const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const postHandler = route.slice(route.indexOf("export async function POST"), route.indexOf("export async function PATCH"));
@@ -641,6 +647,78 @@ test("protects Excel imports with the signed-in supervisor or admin role", async
   assert.match(postHandler, /getActiveRequestUser/);
   assert.match(postHandler, /!isManualEntry && actor\.role === "user"/);
   assert.doesNotMatch(page, /Excel 匯入網站管理密碼|excelImportPassword/);
+});
+
+test("enables AD USER with the agreed data permissions while reserving axle and restore operations", async () => {
+  const auth = await readFile(new URL("../app/lib/auth.ts", import.meta.url), "utf8");
+  const adminPage = await readFile(new URL("../app/admin-area/page.tsx", import.meta.url), "utf8");
+  const adminRoute = await readFile(new URL("../app/api/admin/users/route.ts", import.meta.url), "utf8");
+  const lubricationRoute = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
+  const axleRoute = await readFile(new URL("../app/api/device-axle-profiles/route.ts", import.meta.url), "utf8");
+  const proxy = await readFile(new URL("../proxy.ts", import.meta.url), "utf8");
+  const userMigration = await readFile(new URL("../drizzle/0003_marvelous_maverick.sql", import.meta.url), "utf8");
+  const signInMigration = await readFile(new URL("../drizzle/0005_gray_penance.sql", import.meta.url), "utf8");
+  const auditMigration = await readFile(new URL("../drizzle/0008_lying_slayback.sql", import.meta.url), "utf8");
+  const migration = await readFile(new URL("../drizzle/0009_glorious_maggott.sql", import.meta.url), "utf8");
+
+  assert.match(auth, /export type AuthRole = "user" \| "userpro" \| "supervisor" \| "admin"/);
+  assert.match(adminRoute, /role !== "userpro"/);
+  assert.doesNotMatch(adminPage, /userpro" disabled|AD USER（未啟用）|暫不開放指派/);
+  assert.match(lubricationRoute, /只有 AD USER、POWER USER 或 ADMIN 可以匯入 Excel/);
+  assert.match(lubricationRoute, /只有 AD USER、POWER USER 或 ADMIN 可以刪除紀錄/);
+  assert.match(axleRoute, /actor\.role === "user" \|\| actor\.role === "userpro"/);
+  assert.match(proxy, /effectiveSession\.role === "user" \|\| effectiveSession\.role === "userpro"/);
+  assert.match(migration, /IN \('user', 'userpro', 'supervisor', 'admin'\)/);
+
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec(userMigration.replaceAll("--> statement-breakpoint", ""));
+    database.exec(signInMigration.replaceAll("--> statement-breakpoint", ""));
+    database.exec(auditMigration.replaceAll("--> statement-breakpoint", ""));
+    database.prepare(
+      `INSERT INTO users (id, name, username, role, status, password_hash, password_salt, password_iterations, force_password_change, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("USR-OLD", "既有帳號", "existing", "user", "active", "hash", "salt", 120000, 0, "admin");
+    database.prepare(
+      "INSERT INTO sign_in_events (id, user_id, username, success, outcome, source) VALUES (?, ?, ?, 1, 'success', '127.0.0.1')",
+    ).run("SIGNIN-OLD", "USR-OLD", "existing");
+    database.prepare(
+      `INSERT INTO audit_events (id, actor_user_id, actor_username, actor_role, source_ip, request_id, action, resource_type, result)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("AUDIT-OLD", "USR-OLD", "existing", "user", "127.0.0.1", "REQ-OLD", "auth.login_success", "authentication", "success");
+    database.exec(migration.replaceAll("--> statement-breakpoint", ""));
+    assert.equal(database.prepare("SELECT username FROM users WHERE id = ?").get("USR-OLD").username, "existing");
+    assert.equal(database.prepare("SELECT user_id FROM sign_in_events WHERE id = ?").get("SIGNIN-OLD").user_id, "USR-OLD");
+    assert.equal(database.prepare("SELECT actor_user_id FROM audit_events WHERE id = ?").get("AUDIT-OLD").actor_user_id, "USR-OLD");
+    assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+    database.prepare(
+      `INSERT INTO users (id, name, username, role, status, password_hash, password_salt, password_iterations, force_password_change, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("USR-AD", "進階使用者", "advanced", "userpro", "active", "hash", "salt", 120000, 0, "admin");
+    assert.equal(database.prepare("SELECT role FROM users WHERE id = ?").get("USR-AD").role, "userpro");
+  } finally {
+    database.close();
+  }
+});
+
+test("shows each signed-in person's recent submissions and enforces the 30-minute self-edit window", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
+
+  assert.match(page, /我的近期提交/);
+  assert.match(page, /最近 8 小時的現場登記/);
+  assert.match(page, /送出後 30 分鐘內可自行修改/);
+  assert.match(page, /view=my-submissions/);
+  assert.match(page, /method: editingSubmission \? "PATCH" : "POST"/);
+  assert.match(page, /提交後 30 分鐘內由建立者自行修正/);
+  assert.match(page, /請洽 AD USER/);
+  assert.match(route, /USER_SELF_EDIT_WINDOW_MS = 30 \* 60 \* 1000/);
+  assert.match(route, /MY_SUBMISSIONS_VISIBLE_WINDOW_MS = 8 \* 60 \* 60 \* 1000/);
+  assert.match(route, /item\.createdBy\.trim\(\)\.toLowerCase\(\) === normalizedUsername/);
+  assert.match(route, /target\.createdBy\.trim\(\)\.toLowerCase\(\) === actor\.username\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(route, /Date\.now\(\) > createdAt \+ USER_SELF_EDIT_WINDOW_MS/);
+  assert.match(route, /這筆紀錄已超過 30 分鐘修改期限，請聯絡 AD USER 協助更正/);
+  assert.match(route, /action: "lubrication\.measurement_corrected"/);
 });
 
 test("attributes manual registration to the authenticated user", async () => {

@@ -1,7 +1,7 @@
 export const AUTH_COOKIE_NAME = "mrt_monitor_session";
 export const AUTH_SESSION_SECONDS = 8 * 60 * 60;
 
-export type AuthRole = "user" | "supervisor" | "admin";
+export type AuthRole = "user" | "userpro" | "supervisor" | "admin";
 
 export type AuthSession = {
   username: string;
@@ -184,7 +184,7 @@ function isStoredSession(value: unknown): value is StoredSession {
   return session.version === 1
     && typeof session.username === "string"
     && typeof session.name === "string"
-    && (session.role === "user" || session.role === "supervisor" || session.role === "admin")
+    && (session.role === "user" || session.role === "userpro" || session.role === "supervisor" || session.role === "admin")
     && typeof session.expiresAt === "number";
 }
 

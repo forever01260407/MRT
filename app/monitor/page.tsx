@@ -233,7 +233,7 @@ export default function MonitorPage() {
 
   const correctedCount = records.filter((item) => item.revisions.length > 0).length;
   const revisionCount = records.reduce((sum, item) => sum + item.revisions.length, 0);
-  const canDelete = signedInUser?.role === "supervisor" || signedInUser?.role === "admin";
+  const canDelete = signedInUser?.role === "userpro" || signedInUser?.role === "supervisor" || signedInUser?.role === "admin";
   const canRestore = signedInUser?.role === "supervisor" || signedInUser?.role === "admin";
 
   const openCorrection = (item: MonitoredLubricationRecord) => {

@@ -132,6 +132,7 @@ button:focus-visible {
 .mini-monitor-link b { color: var(--violet); font-size: 13px; }
 
 .data-entry-grid { margin-bottom: 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 16px; }
+.data-entry-grid.single { grid-template-columns: minmax(0, 1fr); }
 .excel-import-panel {
   min-width: 0;
   margin: 0;
@@ -229,6 +230,48 @@ button:focus-visible {
 .manual-entry-panel.success .manual-entry-feedback strong { color: #087b59; }
 .manual-entry-panel.error .manual-entry-feedback strong { color: #b32643; }
 .manual-entry-feedback span { line-height: 1.55; }
+
+.my-submissions-panel {
+  margin-bottom: 16px;
+  border: 1px solid #dce3ec;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(36, 49, 75, .045);
+  overflow: hidden;
+}
+.my-submissions-panel > header { padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border-bottom: 1px solid #e8edf3; background: linear-gradient(135deg, #fff 55%, #f4f2ff); }
+.my-submissions-panel > header h3 { margin: 3px 0; color: var(--ink); font-size: 18px; }
+.my-submissions-panel > header p { margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.5; }
+.my-submissions-panel > header button, .my-submissions-table button.edit {
+  min-height: 40px;
+  padding: 8px 13px;
+  border: 1px solid #c9c3ff;
+  border-radius: 9px;
+  color: var(--violet);
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 850;
+  cursor: pointer;
+}
+.my-submissions-panel > header button:hover, .my-submissions-table button.edit:hover { border-color: var(--violet); background: var(--violet-soft); }
+.my-submissions-panel > header button:disabled { opacity: .65; cursor: wait; }
+.my-submissions-table-wrap { overflow-x: auto; }
+.my-submissions-table { width: 100%; min-width: 760px; border-collapse: collapse; }
+.my-submissions-table th { padding: 11px 16px; text-align: left; color: var(--muted); background: #f7f9fc; font-size: 13px; letter-spacing: .04em; }
+.my-submissions-table td { padding: 13px 16px; border-top: 1px solid #edf1f5; color: var(--ink-soft); font-size: 14px; vertical-align: middle; }
+.my-submissions-table td strong, .my-submissions-table td small { display: block; }
+.my-submissions-table td strong { color: var(--ink); font-size: 14px; }
+.my-submissions-table td small { margin-top: 3px; color: var(--muted); font-size: 13px; }
+.my-submissions-table td:nth-child(4) > span { display: inline-flex; padding: 4px 8px; border-radius: 999px; font-size: 13px; font-weight: 850; }
+.my-submissions-table td:nth-child(4) > span.editable { color: #087b59; background: #e8f8f2; }
+.my-submissions-table td:nth-child(4) > span.locked { color: #6d7788; background: #eef1f5; }
+.contact-ad-user { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.my-submissions-empty { padding: 24px 18px; text-align: center; }
+.my-submissions-empty strong { color: var(--ink); font-size: 15px; }
+.my-submissions-empty p { margin: 5px 0 0; color: var(--muted); font-size: 14px; }
+.my-submissions-empty.error strong, .my-submissions-status.error { color: #b32643; }
+.my-submissions-status { margin: 0; padding: 9px 18px; border-top: 1px solid #edf1f5; color: var(--muted); background: #fbfcfe; font-size: 13px; }
 
 .manual-entry-backdrop {
   padding: 20px;
@@ -1272,6 +1315,7 @@ button:focus-visible {
 
 @media (max-width: 980px) {
   .data-entry-grid { grid-template-columns: 1fr; }
+  .my-submissions-panel > header { align-items: flex-start; }
   .workspace-grid { grid-template-columns: 1fr; }
   .topology-stage { height: 680px; }
   .station-y8.label-bottom .station-label { left: 70px; top: 101px; transform: none; text-align: left; }

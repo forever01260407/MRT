@@ -78,19 +78,17 @@ export async function proxy(request: NextRequest) {
       return NextResponse.redirect(new URL("/forbidden", request.url));
     }
 
-    if (pathname === "/api/device-axle-profiles" && request.method === "PUT" && effectiveSession.role === "user") {
+    if (pathname === "/api/device-axle-profiles" && request.method === "PUT"
+      && (effectiveSession.role === "user" || effectiveSession.role === "userpro")) {
       return NextResponse.json({ error: "目前角色沒有修改階軸設定的權限。" }, { status: 403 });
     }
 
-    if (pathname === "/api/lubrication" && request.method === "PATCH" && effectiveSession.role === "user") {
-      return NextResponse.json({ error: "只有 POWER USER 或 ADMIN 可以更正紀錄。" }, { status: 403 });
-    }
-
     if (pathname === "/api/lubrication" && request.method === "DELETE" && effectiveSession.role === "user") {
-      return NextResponse.json({ error: "只有 POWER USER 或 ADMIN 可以刪除紀錄。" }, { status: 403 });
+      return NextResponse.json({ error: "只有 AD USER、POWER USER 或 ADMIN 可以刪除紀錄。" }, { status: 403 });
     }
 
-    if (pathname === "/api/lubrication" && request.method === "PUT" && effectiveSession.role === "user") {
+    if (pathname === "/api/lubrication" && request.method === "PUT"
+      && (effectiveSession.role === "user" || effectiveSession.role === "userpro")) {
       return NextResponse.json({ error: "只有 POWER USER 或 ADMIN 可以從垃圾桶還原紀錄。" }, { status: 403 });
     }
 
