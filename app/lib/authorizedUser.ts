@@ -10,11 +10,12 @@ export async function getActiveRequestUser(request: Request) {
   if (!runtimeEnv.DB) return session;
 
   const storedUser = await getStoredUserAccess(await getD1(), session.username);
-  if (!storedUser || storedUser.status !== "active") return null;
+  if (!storedUser || storedUser.status !== "active" || storedUser.sessionVersion !== session.sessionVersion) return null;
   return {
     username: storedUser.username,
     name: storedUser.name,
     role: storedUser.role,
+    sessionVersion: storedUser.sessionVersion,
     expiresAt: session.expiresAt,
   };
 }

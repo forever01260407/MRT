@@ -1,13 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
+
+const subscribeToLocation = () => () => {};
+
+function passwordWasChanged() {
+  return new URLSearchParams(window.location.search).get("passwordChanged") === "1";
+}
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const passwordChanged = useSyncExternalStore(subscribeToLocation, passwordWasChanged, () => false);
 
   const signIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -52,6 +59,7 @@ export default function LoginPage() {
           <form onSubmit={signIn}>
             <label><span>帳號</span><input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" autoFocus required placeholder="輸入帳號" /></label>
             <label><span>密碼</span><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required placeholder="輸入密碼" /></label>
+            {passwordChanged ? <div className="login-success" role="status"><span aria-hidden="true">✓</span>密碼已更新，請使用新密碼重新登入。</div> : null}
             {error ? <div className="login-error" role="alert"><span aria-hidden="true">!</span>{error}</div> : null}
             <button type="submit" className="login-submit" disabled={submitting}>{submitting ? "驗證中…" : "登入系統"}<span aria-hidden="true">→</span></button>
           </form>

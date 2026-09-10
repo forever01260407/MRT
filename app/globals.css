@@ -545,9 +545,29 @@ button:focus-visible {
 .role-display-badge.supervisor { border-color: #c2410c; background: #c2410c; }
 .role-display-badge.admin { border-color: #c62845; background: #c62845; }
 .role-display-badge.root { color: #1d1938; border-color: #d7a72e; background: #f2c66d; }
-.session-menu > button { padding: 6px 8px; border: 0; border-left: 1px solid rgba(255, 255, 255, .14); color: #d9daf0; background: transparent; font-size: 9px; font-weight: 800; cursor: pointer; }
-.session-menu > button:hover { color: #fff; }
-.session-menu > button:disabled { opacity: .55; cursor: wait; }
+.session-actions { display: flex; align-items: stretch; align-self: stretch; }
+.session-actions button { padding: 6px 8px; border: 0; border-left: 1px solid rgba(255, 255, 255, .14); color: #d9daf0; background: transparent; font-size: 9px; font-weight: 800; cursor: pointer; }
+.session-actions button:hover { color: #fff; }
+.session-actions button:disabled { opacity: .55; cursor: wait; }
+
+.account-password-backdrop { position: fixed; inset: 0; z-index: 2000; padding: 20px; display: grid; place-items: center; background: rgba(10, 14, 38, .64); backdrop-filter: blur(7px); }
+.account-password-dialog { width: min(500px, 100%); overflow: hidden; border: 1px solid #dfe3ec; border-radius: 20px; color: var(--ink); background: #fff; box-shadow: 0 28px 80px rgba(11, 15, 43, .26); }
+.account-password-dialog > header { padding: 24px 26px 20px; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); background: linear-gradient(135deg, #fff, #f5f3ff); }
+.account-password-dialog > header span { color: var(--violet); font-size: 11px; font-weight: 950; letter-spacing: .14em; }
+.account-password-dialog > header h2 { margin: 6px 0 3px; font-size: 24px; }
+.account-password-dialog > header p { margin: 0; color: var(--muted); font-size: 14px; }
+.account-password-dialog > header button { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: #fff; font-size: 22px; cursor: pointer; }
+.account-password-dialog form { padding: 24px 26px 26px; display: grid; gap: 16px; }
+.account-password-dialog label { display: grid; gap: 7px; }
+.account-password-dialog label span { font-size: 14px; font-weight: 850; }
+.account-password-dialog input { min-height: 45px; padding: 10px 12px; border: 1px solid #cfd5e1; border-radius: 10px; color: var(--ink); background: #fff; font: inherit; font-size: 16px; }
+.account-password-dialog input:focus { outline: 3px solid rgba(98, 85, 223, .16); border-color: var(--violet); }
+.account-password-note { margin: 0; padding: 12px 13px; border-radius: 9px; color: var(--ink-soft); background: #f3f5f9; font-size: 13px; line-height: 1.65; }
+.account-password-error { padding: 11px 13px; border-radius: 9px; color: #a91d38; background: #ffe9ee; font-size: 14px; font-weight: 750; }
+.account-password-dialog footer { display: flex; justify-content: flex-end; gap: 9px; }
+.account-password-dialog footer button { min-height: 42px; padding: 9px 15px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink-soft); background: #fff; font-size: 14px; font-weight: 850; cursor: pointer; }
+.account-password-dialog footer button[type="submit"] { color: #fff; border-color: var(--violet); background: var(--violet); }
+.account-password-dialog button:disabled { opacity: .55; cursor: wait; }
 
 .login-page { min-height: 100vh; display: grid; grid-template-columns: minmax(380px, .92fr) minmax(520px, 1.08fr); background: #f5f7fb; }
 .login-brand-panel { min-height: 100vh; padding: clamp(34px, 5vw, 72px); display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; color: #fff; background: radial-gradient(circle at 78% 22%, rgba(98, 85, 223, .34), transparent 32%), linear-gradient(145deg, #0b0f2b 0%, #191647 58%, #10132f 100%); position: relative; }
@@ -579,6 +599,8 @@ button:focus-visible {
 .login-error { padding: 11px 12px; display: flex; align-items: center; gap: 9px; border: 1px solid #ffc4cf; border-radius: 9px; color: #a51f3a; background: var(--danger-soft); font-size: 11px; font-weight: 750; }
 .login-error span { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: var(--danger); font-size: 10px; font-weight: 950; }
 .login-footnote { margin: 16px 0 0; color: var(--muted); font-size: 9px; text-align: center; }
+.login-success { padding: 11px 12px; display: flex; align-items: center; gap: 8px; border-radius: 9px; color: #087a57; background: #e4f8f1; font-size: 14px; font-weight: 750; }
+.login-success span { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: #0fa878; font-size: 12px; }
 
 .forbidden-page { min-height: 100vh; padding: 24px; display: grid; place-items: center; background: radial-gradient(circle at 50% 15%, #eeecff, transparent 38%), var(--canvas); text-align: center; }
 .forbidden-page section { width: min(560px, 100%); padding: 42px; border: 1px solid var(--line); border-radius: 20px; background: #fff; box-shadow: 0 20px 60px rgba(23, 33, 58, .1); }

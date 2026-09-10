@@ -39,6 +39,7 @@ type StoredUserRow = {
   password_hash: string;
   password_salt: string;
   password_iterations: number;
+  session_version: number;
   force_password_change: number;
   last_login_at: string | null;
   created_by: string;
@@ -67,6 +68,7 @@ const USERS_TABLE_SQL = `CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   password_salt TEXT NOT NULL,
   password_iterations INTEGER NOT NULL,
+  session_version INTEGER NOT NULL DEFAULT 1,
   force_password_change INTEGER NOT NULL DEFAULT 1,
   last_login_at TEXT,
   created_by TEXT NOT NULL,
@@ -179,13 +181,27 @@ export class AccountProtectionError extends Error {
   }
 }
 
+export class CurrentPasswordError extends Error {
+  constructor() {
+    super("目前密碼不正確。");
+    this.name = "CurrentPasswordError";
+  }
+}
+
+export class PasswordReuseError extends Error {
+  constructor() {
+    super("新密碼不能與目前密碼相同。");
+    this.name = "PasswordReuseError";
+  }
+}
+
 async function findUserById(database: Database, userId: string) {
   if (userId === ROOT_USER_ID) {
     throw new AccountProtectionError("ROOT 是系統唯一最高管理者，不能從帳號管理介面變更。");
   }
   const row = await database.prepare(
     `SELECT id, name, username, role, status, password_hash, password_salt,
-      password_iterations, force_password_change, last_login_at, created_by, created_at, updated_at
+      password_iterations, session_version, force_password_change, last_login_at, created_by, created_at, updated_at
     FROM users WHERE id = ? LIMIT 1`,
   ).bind(userId).first<StoredUserRow>();
   if (!row) throw new UserNotFoundError();
@@ -330,7 +346,7 @@ export async function listUsers(database: Database) {
   const [result, rootLastLogin] = await Promise.all([
     database.prepare(
       `SELECT id, name, username, role, status, password_hash, password_salt,
-        password_iterations, force_password_change, last_login_at, created_by, created_at, updated_at
+        password_iterations, session_version, force_password_change, last_login_at, created_by, created_at, updated_at
       FROM users
       WHERE username != ? COLLATE NOCASE
       ORDER BY CASE role WHEN 'admin' THEN 1 WHEN 'supervisor' THEN 2 WHEN 'userpro' THEN 3 ELSE 4 END, created_at ASC`,
@@ -346,13 +362,13 @@ export async function listUsers(database: Database) {
 
 export async function getStoredUserAccess(database: Database, username: string) {
   await ensureUsersTable(database);
-  if (isRootUsername(username)) return systemRootUser();
+  if (isRootUsername(username)) return { ...systemRootUser(), sessionVersion: 1 };
   const row = await database.prepare(
     `SELECT id, name, username, role, status, password_hash, password_salt,
-      password_iterations, force_password_change, last_login_at, created_by, created_at, updated_at
+      password_iterations, session_version, force_password_change, last_login_at, created_by, created_at, updated_at
     FROM users WHERE username = ? COLLATE NOCASE LIMIT 1`,
   ).bind(username.trim().toLowerCase()).first<StoredUserRow>();
-  return row ? publicUser(row) : null;
+  return row ? { ...publicUser(row), sessionVersion: row.session_version } : null;
 }
 
 export async function authenticateStoredUser(
@@ -366,7 +382,7 @@ export async function authenticateStoredUser(
   if (isRootUsername(normalizedUsername)) return null;
   const row = await database.prepare(
     `SELECT id, name, username, role, status, password_hash, password_salt,
-      password_iterations, force_password_change, last_login_at, created_by, created_at, updated_at
+      password_iterations, session_version, force_password_change, last_login_at, created_by, created_at, updated_at
     FROM users WHERE username = ? COLLATE NOCASE LIMIT 1`,
   ).bind(normalizedUsername).first<StoredUserRow>();
   if (!row) {
@@ -420,7 +436,7 @@ export async function authenticateStoredUser(
     "UPDATE users SET status = 'active', last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
   ).bind(row.id).run();
   await insertSignInEvent(database, { userId: row.id, userRole: row.role, username: row.username, outcome: "success", context });
-  return { username: row.username, name: row.username, role: row.role };
+  return { username: row.username, name: row.username, role: row.role, sessionVersion: row.session_version };
 }
 
 export async function getSignInSecuritySnapshot(database: Database) {
@@ -508,7 +524,7 @@ export async function createStoredUser(database: Database, options: {
 
   const row = await database.prepare(
     `SELECT id, name, username, role, status, password_hash, password_salt,
-      password_iterations, force_password_change, last_login_at, created_by, created_at, updated_at
+      password_iterations, session_version, force_password_change, last_login_at, created_by, created_at, updated_at
     FROM users WHERE id = ? LIMIT 1`,
   ).bind(id).first<StoredUserRow>();
   if (!row) throw new Error("帳號已建立，但無法讀取建立結果。");
@@ -529,7 +545,7 @@ export async function resetStoredUserPassword(database: Database, options: {
   await database.batch([database.prepare(
     `UPDATE users
     SET password_hash = ?, password_salt = ?, password_iterations = ?,
-      force_password_change = 0, updated_at = CURRENT_TIMESTAMP
+      session_version = session_version + 1, force_password_change = 0, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?`,
   ).bind(credential.hash, credential.salt, credential.iterations, options.userId), prepareAuditEvent(database, {
     ...options.audit,
@@ -541,6 +557,78 @@ export async function resetStoredUserPassword(database: Database, options: {
     after: { password: "已重設（內容不記錄）" },
   })]);
   return publicUser(await findUserById(database, options.userId));
+}
+
+export async function changeStoredUserPassword(database: Database, options: {
+  username: string;
+  currentPassword: string;
+  newPassword: string;
+  audit: AuditContext;
+}) {
+  await ensureUsersTable(database);
+  if (isRootUsername(options.username)) {
+    throw new AccountProtectionError("最高管理者密碼由網站擁有者的部署設定管理。");
+  }
+
+  const row = await database.prepare(
+    `SELECT id, name, username, role, status, password_hash, password_salt,
+      password_iterations, session_version, force_password_change, last_login_at, created_by, created_at, updated_at
+    FROM users WHERE username = ? COLLATE NOCASE LIMIT 1`,
+  ).bind(options.username.trim().toLowerCase()).first<StoredUserRow>();
+  if (!row) throw new UserNotFoundError();
+
+  const credential = {
+    hash: row.password_hash,
+    salt: row.password_salt,
+    iterations: row.password_iterations,
+  };
+  if (!await verifyPassword(options.currentPassword, credential)) {
+    await prepareAuditEvent(database, {
+      ...options.audit,
+      actorUserId: row.id,
+      action: "user.password_changed",
+      resourceType: "user",
+      resourceId: row.id,
+      resourceLabel: `@${row.username}`,
+      after: { password: "未變更（內容不記錄）" },
+      result: "failure",
+      errorCode: "current_password_invalid",
+    }).run();
+    throw new CurrentPasswordError();
+  }
+
+  if (await verifyPassword(options.newPassword, credential)) {
+    await prepareAuditEvent(database, {
+      ...options.audit,
+      actorUserId: row.id,
+      action: "user.password_changed",
+      resourceType: "user",
+      resourceId: row.id,
+      resourceLabel: `@${row.username}`,
+      after: { password: "未變更（內容不記錄）" },
+      result: "failure",
+      errorCode: "password_reuse",
+    }).run();
+    throw new PasswordReuseError();
+  }
+
+  const nextCredential = await createPasswordCredential(options.newPassword);
+  await database.batch([database.prepare(
+    `UPDATE users
+    SET password_hash = ?, password_salt = ?, password_iterations = ?,
+      session_version = session_version + 1, force_password_change = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?`,
+  ).bind(nextCredential.hash, nextCredential.salt, nextCredential.iterations, row.id), prepareAuditEvent(database, {
+    ...options.audit,
+    actorUserId: row.id,
+    action: "user.password_changed",
+    resourceType: "user",
+    resourceId: row.id,
+    resourceLabel: `@${row.username}`,
+    before: { password: "受保護，不記錄" },
+    after: { password: "已由本人更換（內容不記錄）" },
+    reason: "使用者自行更換密碼",
+  })]);
 }
 
 export async function updateStoredUserStatus(database: Database, options: {

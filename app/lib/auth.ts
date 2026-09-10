@@ -10,11 +10,12 @@ export type AuthSession = {
   username: string;
   name: string;
   role: AuthRole;
+  sessionVersion: number;
   expiresAt: number;
 };
 
 type StoredSession = AuthSession & {
-  version: 1;
+  version: 2;
 };
 
 type RateLimitResult = {
@@ -195,10 +196,13 @@ function timingSafeEqual(left: string, right: string) {
 function isStoredSession(value: unknown): value is StoredSession {
   if (!value || typeof value !== "object") return false;
   const session = value as Partial<StoredSession>;
-  return session.version === 1
+  return session.version === 2
     && typeof session.username === "string"
     && typeof session.name === "string"
     && (session.role === "user" || session.role === "userpro" || session.role === "supervisor" || session.role === "admin" || session.role === "root")
+    && typeof session.sessionVersion === "number"
+    && Number.isInteger(session.sessionVersion)
+    && session.sessionVersion > 0
     && typeof session.expiresAt === "number";
 }
 
@@ -232,7 +236,7 @@ export async function validateRootCredentials(options: {
     sha256Hex(configuredPassword),
   ]);
   if (!timingSafeEqual(submittedHash, expectedHash)) return null;
-  return { username: ROOT_USERNAME, name: "ROOT", role: "root" as const };
+  return { username: ROOT_USERNAME, name: "ROOT", role: "root" as const, sessionVersion: 1 };
 }
 
 export async function validateDevelopmentCredentials(options: {
@@ -246,7 +250,7 @@ export async function validateDevelopmentCredentials(options: {
   const submittedHash = await sha256Hex(options.password);
   const expectedHash = account?.passwordHash ?? developmentAccounts[0].passwordHash;
   if (!account || !timingSafeEqual(submittedHash, expectedHash)) return null;
-  return { username: account.username, name: account.name, role: account.role };
+  return { username: account.username, name: account.name, role: account.role, sessionVersion: 1 };
 }
 
 export async function enforceLoginRateLimit(options: {
@@ -270,13 +274,13 @@ export async function enforceLoginRateLimit(options: {
 }
 
 export async function createSessionToken(options: {
-  account: Pick<AuthSession, "username" | "name" | "role">;
+  account: Pick<AuthSession, "username" | "name" | "role" | "sessionVersion">;
   secret: string;
   now?: number;
 }) {
   const now = options.now ?? Date.now();
   const payload: StoredSession = {
-    version: 1,
+    version: 2,
     ...options.account,
     expiresAt: now + AUTH_SESSION_SECONDS * 1000,
   };
@@ -304,6 +308,7 @@ export async function verifySessionToken(token: string, secret: string, now = Da
       username: payload.username,
       name: payload.name,
       role: payload.role,
+      sessionVersion: payload.sessionVersion,
       expiresAt: payload.expiresAt,
     };
   } catch {

@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     const storedUser = runtimeEnv.DB
       ? await getStoredUserAccess(await getD1(), session.username)
       : null;
-    if (runtimeEnv.DB && (!storedUser || storedUser.status !== "active")) {
+    if (runtimeEnv.DB && (!storedUser || storedUser.status !== "active" || storedUser.sessionVersion !== session.sessionVersion)) {
       const requestUrl = new URL(request.url);
       return Response.json(
         { authenticated: false, error: "帳號已停用或登入狀態已失效。" },

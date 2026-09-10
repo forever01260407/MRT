@@ -434,6 +434,52 @@ test("persists password resets, role changes, and account disabling without expo
   assert.doesNotMatch(page, /強制登出/);
 });
 
+test("lets every signed-in non-root account change its own password without a length rule", async () => {
+  const route = await readFile(new URL("../app/api/account/password/route.ts", import.meta.url), "utf8");
+  const sessionMenu = await readFile(new URL("../app/components/AuthSessionProvider.tsx", import.meta.url), "utf8");
+  const loginPage = await readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8");
+  const auth = await readFile(new URL("../app/lib/auth.ts", import.meta.url), "utf8");
+  const userStore = await readFile(new URL("../app/lib/userStore.ts", import.meta.url), "utf8");
+  const proxy = await readFile(new URL("../proxy.ts", import.meta.url), "utf8");
+  const userMigration = await readFile(new URL("../drizzle/0003_marvelous_maverick.sql", import.meta.url), "utf8");
+  const sessionMigration = await readFile(new URL("../drizzle/0010_flat_frog_thor.sql", import.meta.url), "utf8");
+
+  assert.match(route, /export async function POST/);
+  assert.match(route, /changeStoredUserPassword/);
+  assert.match(route, /newPassword !== confirmPassword/);
+  assert.match(route, /serializeExpiredSessionCookie/);
+  assert.match(sessionMenu, /更換自己的密碼/);
+  assert.match(sessionMenu, /user\.role !== "root"/);
+  assert.match(sessionMenu, /密碼不限制長度或字元組合，但不能與目前密碼相同/);
+  assert.doesNotMatch(`${route}\n${sessionMenu}`, /minLength=|至少 8 個字元/);
+  assert.match(loginPage, /密碼已更新，請使用新密碼重新登入/);
+  assert.match(auth, /sessionVersion/);
+  assert.match(userStore, /verifyPassword\(options\.currentPassword/);
+  assert.match(userStore, /verifyPassword\(options\.newPassword/);
+  assert.match(userStore, /session_version = session_version \+ 1/);
+  assert.match(userStore, /action: "user\.password_changed"/);
+  assert.doesNotMatch(userStore, /after: \{ password: options\.newPassword/);
+  assert.match(proxy, /storedUser\.sessionVersion !== session\.sessionVersion/);
+  assert.match(sessionMigration, /ALTER TABLE `users` ADD `session_version` integer DEFAULT 1 NOT NULL/);
+
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec(userMigration.replaceAll("--> statement-breakpoint", ""));
+    database.exec(sessionMigration.replaceAll("--> statement-breakpoint", ""));
+    const initial = database.prepare("SELECT session_version FROM users LIMIT 1").get();
+    assert.equal(initial, undefined);
+    database.prepare(
+      `INSERT INTO users (id, name, username, role, status, password_hash, password_salt, password_iterations, force_password_change, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("USR-SELF", "self", "self", "user", "active", "hash", "salt", 120000, 0, "system");
+    assert.equal(database.prepare("SELECT session_version FROM users WHERE id = ?").get("USR-SELF").session_version, 1);
+    database.prepare("UPDATE users SET session_version = session_version + 1 WHERE id = ?").run("USR-SELF");
+    assert.equal(database.prepare("SELECT session_version FROM users WHERE id = ?").get("USR-SELF").session_version, 2);
+  } finally {
+    database.close();
+  }
+});
+
 test("records and displays a unified audit trail with IP and before-after details", async () => {
   const auditStore = await readFile(new URL("../app/lib/auditLog.ts", import.meta.url), "utf8");
   const auditRoute = await readFile(new URL("../app/api/admin/audit/route.ts", import.meta.url), "utf8");

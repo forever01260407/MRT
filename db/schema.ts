@@ -117,6 +117,7 @@ export const users = sqliteTable("users", {
   passwordHash: text("password_hash").notNull(),
   passwordSalt: text("password_salt").notNull(),
   passwordIterations: integer("password_iterations").notNull(),
+  sessionVersion: integer("session_version").notNull().default(1),
   forcePasswordChange: integer("force_password_change", { mode: "boolean" }).notNull().default(true),
   lastLoginAt: text("last_login_at"),
   createdBy: text("created_by").notNull(),

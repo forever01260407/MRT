@@ -127,6 +127,7 @@ const auditActionLabels: Record<string, string> = {
   "user.role_changed": "變更角色",
   "user.status_changed": "停用／啟用帳號",
   "user.password_reset": "重設密碼",
+  "user.password_changed": "本人更換密碼",
   "lubrication.measurement_created": "新增油耗紀錄",
   "lubrication.excel_imported": "匯入油耗資料",
   "lubrication.measurement_corrected": "更正油耗紀錄",

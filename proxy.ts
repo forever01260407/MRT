@@ -60,7 +60,7 @@ export async function proxy(request: NextRequest) {
     const storedUser = runtimeEnv.DB
       ? await getStoredUserAccess(await getD1(), session.username)
       : null;
-    if (runtimeEnv.DB && (!storedUser || storedUser.status !== "active")) {
+    if (runtimeEnv.DB && (!storedUser || storedUser.status !== "active" || storedUser.sessionVersion !== session.sessionVersion)) {
       return expiredSessionResponse(request);
     }
     const effectiveSession = storedUser
