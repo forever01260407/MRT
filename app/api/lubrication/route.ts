@@ -387,6 +387,36 @@ async function initializeDatabase(d1: D1Database) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
     d1.prepare(DEVICE_AXLE_PROFILE_TABLE_SQL),
+  ]);
+
+  const [measurementColumns, revisionColumns] = await Promise.all([
+    d1.prepare("PRAGMA table_info(measurements)").all<{ name: string }>(),
+    d1.prepare("PRAGMA table_info(measurement_revisions)").all<{ name: string }>(),
+  ]);
+  const measurementColumnNames = new Set(measurementColumns.results.map((column) => column.name));
+  const revisionColumnNames = new Set(revisionColumns.results.map((column) => column.name));
+  const schemaRepairs: D1PreparedStatement[] = [];
+  if (!measurementColumnNames.has("created_ip")) {
+    schemaRepairs.push(d1.prepare("ALTER TABLE measurements ADD COLUMN created_ip TEXT NOT NULL DEFAULT '未知'"));
+  }
+  if (!measurementColumnNames.has("deleted_at")) {
+    schemaRepairs.push(d1.prepare("ALTER TABLE measurements ADD COLUMN deleted_at TEXT"));
+  }
+  if (!measurementColumnNames.has("deleted_by")) {
+    schemaRepairs.push(d1.prepare("ALTER TABLE measurements ADD COLUMN deleted_by TEXT"));
+  }
+  if (!measurementColumnNames.has("deleted_ip")) {
+    schemaRepairs.push(d1.prepare("ALTER TABLE measurements ADD COLUMN deleted_ip TEXT"));
+  }
+  if (!measurementColumnNames.has("delete_reason")) {
+    schemaRepairs.push(d1.prepare("ALTER TABLE measurements ADD COLUMN delete_reason TEXT"));
+  }
+  if (!revisionColumnNames.has("source_ip")) {
+    schemaRepairs.push(d1.prepare("ALTER TABLE measurement_revisions ADD COLUMN source_ip TEXT NOT NULL DEFAULT '未知'"));
+  }
+  if (schemaRepairs.length) await d1.batch(schemaRepairs);
+
+  await d1.batch([
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS measurements_device_measured_at_uidx ON measurements (device_id, measured_at)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurements_measured_at ON measurements (measured_at)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS idx_measurements_import_batch_id ON measurements (import_batch_id)"),

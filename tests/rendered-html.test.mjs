@@ -763,6 +763,18 @@ test("adds soft-delete audit storage without losing existing measurement rows", 
   }
 });
 
+test("repairs legacy lubrication columns before creating dependent indexes", async () => {
+  const route = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
+  const deletedAtRepair = route.indexOf("ALTER TABLE measurements ADD COLUMN deleted_at TEXT");
+  const deletedAtIndex = route.indexOf("CREATE INDEX IF NOT EXISTS idx_measurements_deleted_at");
+
+  assert.match(route, /PRAGMA table_info\(measurements\)/);
+  assert.match(route, /PRAGMA table_info\(measurement_revisions\)/);
+  assert.match(route, /ALTER TABLE measurements ADD COLUMN created_ip TEXT NOT NULL DEFAULT '未知'/);
+  assert.match(route, /ALTER TABLE measurement_revisions ADD COLUMN source_ip TEXT NOT NULL DEFAULT '未知'/);
+  assert.ok(deletedAtRepair >= 0 && deletedAtIndex > deletedAtRepair);
+});
+
 test("sorts monitor records by natural device order on demand", async () => {
   const page = await readFile(new URL("../app/monitor/page.tsx", import.meta.url), "utf8");
 
