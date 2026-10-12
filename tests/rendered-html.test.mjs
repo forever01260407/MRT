@@ -602,6 +602,58 @@ test("colors current rail status surfaces from the projected value", async () =>
   assert.doesNotMatch(page, /className=\{getWearStatus\(point\.readings\[side\]\.wear\)\}/);
 });
 
+test("stores editable rail-wear measurements and explicit replacement events", async () => {
+  const response = await render("/wear");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  const page = await readFile(new URL("../app/wear/page.tsx", import.meta.url), "utf8");
+  const route = await readFile(new URL("../app/api/rail-wear/route.ts", import.meta.url), "utf8");
+  const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
+  const migration = await readFile(new URL("../drizzle/0011_cultured_stick.sql", import.meta.url), "utf8");
+
+  assert.match(html, /登記磨耗/);
+  assert.match(html, /登記換軌/);
+  assert.match(page, /fetch\(`\/api\/rail-wear\?mode=\$\{mode\}`/);
+  assert.match(page, /method: editingRecordId \? "PATCH" : "POST"/);
+  assert.match(page, /predictionHistory = history\.slice\(lastReplacementIndex/);
+  assert.match(page, /後續預測只使用新軌資料/);
+  assert.match(page, /更正磨耗紀錄/);
+  assert.match(route, /INSERT INTO rail_wear_records/);
+  assert.match(route, /INSERT INTO rail_wear_revisions/);
+  assert.match(route, /rail_wear\.rail_replaced/);
+  assert.match(route, /USER_SELF_EDIT_WINDOW_MS = 30 \* 60 \* 1000/);
+  assert.doesNotMatch(route, /UPDATE rail_wear_records/);
+  assert.match(schema, /sqliteTable\("rail_wear_records"/);
+  assert.match(schema, /sqliteTable\("rail_wear_revisions"/);
+
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec(migration.replaceAll("--> statement-breakpoint", ""));
+    database.prepare(`INSERT INTO rail_wear_records
+      (id, mode, direction, point_number, rail_side, measured_at, wear, inspector, method, record_type, note, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run("WEAR-1", "side", "up", 5, "left", "2026-10-01", 6.8, "tester", "手工工具量測", "measurement", null, "admin");
+    database.prepare(`INSERT INTO rail_wear_revisions
+      (id, record_id, revision_no, mode, direction, point_number, rail_side, measured_at, wear, inspector, method, record_type, note, correction_reason, corrected_by, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run("WEAR-REV-1", "WEAR-1", 1, "side", "up", 5, "left", "2026-10-01", 6.7, "tester", "手工工具量測", "measurement", null, "誤植修正", "admin", "admin");
+    database.prepare(`INSERT INTO rail_wear_records
+      (id, mode, direction, point_number, rail_side, measured_at, wear, inspector, method, record_type, note, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run("WEAR-2", "side", "up", 5, "left", "2026-10-06", 0.1, "tester", "換軌後初始量測", "replacement", "工單 WR-001", "admin");
+
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM rail_wear_records").get().count, 2);
+    assert.equal(database.prepare("SELECT wear FROM rail_wear_revisions WHERE record_id = ?").get("WEAR-1").wear, 6.7);
+    assert.equal(database.prepare("SELECT record_type FROM rail_wear_records WHERE id = ?").get("WEAR-2").record_type, "replacement");
+    assert.throws(() => database.prepare(`INSERT INTO rail_wear_records
+      (id, mode, direction, point_number, rail_side, measured_at, wear, inspector, method, record_type, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run("WEAR-DUP", "side", "up", 5, "left", "2026-10-06", 0.2, "tester", "手工工具量測", "measurement", "admin"));
+  } finally {
+    database.close();
+  }
+});
+
 test("returns the current Cloudflare time as uncached UTC with Taipei metadata", async () => {
   const response = await render("/api/time");
   assert.equal(response.status, 200);

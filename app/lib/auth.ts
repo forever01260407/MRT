@@ -224,11 +224,11 @@ export async function validateRootCredentials(options: {
 
   if (!isLocal) {
     const configuredOwnerId = options.runtimeEnv.ROOT_OWNER_USER_ID?.trim();
-    const authenticatedOwnerId = options.request.headers.get("oai-authenticated-user-id")?.trim();
-    if (!configuredOwnerId) {
-      throw new AuthConfigurationError("ROOT 尚未綁定網站擁有者，請先完成部署端設定。");
+    if (configuredOwnerId) {
+      const authenticatedOwnerId = options.request.headers.get("oai-authenticated-user-id")?.trim()
+        || options.request.headers.get("cf-access-authenticated-user-email")?.trim();
+      if (!authenticatedOwnerId || !timingSafeEqual(authenticatedOwnerId, configuredOwnerId)) return null;
     }
-    if (!authenticatedOwnerId || !timingSafeEqual(authenticatedOwnerId, configuredOwnerId)) return null;
   }
 
   const [submittedHash, expectedHash] = await Promise.all([

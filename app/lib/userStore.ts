@@ -124,6 +124,7 @@ const initialAccounts: Array<{
 ];
 
 let usersTableReady: Promise<void> | null = null;
+let developmentAccountsReady: Promise<void> | null = null;
 
 function systemRootUser(lastLoginAt: string | null = null): StoredUser {
   return {
@@ -224,7 +225,10 @@ function assertPasswordCanBeReset(row: StoredUserRow, actor: { username: string;
   }
 }
 
-export async function ensureUsersTable(database: Database) {
+export async function ensureUsersTable(
+  database: Database,
+  options: { seedDevelopmentAccounts?: boolean } = {},
+) {
   if (!usersTableReady) {
     usersTableReady = (async () => {
       await database.prepare(USERS_TABLE_SQL).run();
@@ -233,6 +237,16 @@ export async function ensureUsersTable(database: Database) {
       await database.prepare(SIGN_IN_EVENTS_USERNAME_INDEX_SQL).run();
       await database.prepare(SIGN_IN_EVENTS_CREATED_AT_INDEX_SQL).run();
       await ensureAuditEventsTable(database);
+      await database.prepare("PRAGMA optimize").run();
+    })().catch((error) => {
+      usersTableReady = null;
+      throw error;
+    });
+  }
+  await usersTableReady;
+
+  if (options.seedDevelopmentAccounts && !developmentAccountsReady) {
+    developmentAccountsReady = (async () => {
       await database.batch(initialAccounts.map((account) => database.prepare(
         `INSERT OR IGNORE INTO users (
           id, name, username, role, status, password_hash, password_salt,
@@ -253,13 +267,12 @@ export async function ensureUsersTable(database: Database) {
       await database.prepare(
         "UPDATE users SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE status = 'pending'",
       ).run();
-      await database.prepare("PRAGMA optimize").run();
     })().catch((error) => {
-      usersTableReady = null;
+      developmentAccountsReady = null;
       throw error;
     });
   }
-  return usersTableReady;
+  return developmentAccountsReady ?? usersTableReady;
 }
 
 async function insertSignInEvent(
@@ -376,8 +389,9 @@ export async function authenticateStoredUser(
   username: string,
   password: string,
   context: SignInContext = { source: "未知來源" },
+  options: { seedDevelopmentAccounts?: boolean } = {},
 ) {
-  await ensureUsersTable(database);
+  await ensureUsersTable(database, options);
   const normalizedUsername = username.trim().toLowerCase();
   if (isRootUsername(normalizedUsername)) return null;
   const row = await database.prepare(

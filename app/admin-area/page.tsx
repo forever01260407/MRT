@@ -98,6 +98,7 @@ const permissions = [
   { label: "查看監測總覽", group: "監測", user: true, userpro: true, supervisor: true, admin: true },
   { label: "查看完整資料紀錄", group: "監測", user: false, userpro: true, supervisor: true, admin: true },
   { label: "登記現場量測", group: "資料", user: true, userpro: true, supervisor: true, admin: true },
+  { label: "登記軌道磨耗與換軌", group: "資料", user: true, userpro: true, supervisor: true, admin: true },
   { label: "修改自己 30 分鐘內的提交", group: "資料", user: true, userpro: true, supervisor: true, admin: true },
   { label: "匯入 Excel 資料", group: "資料", user: false, userpro: true, supervisor: true, admin: true },
   { label: "更正任意量測紀錄", group: "資料", user: false, userpro: true, supervisor: true, admin: true },
@@ -135,6 +136,9 @@ const auditActionLabels: Record<string, string> = {
   "lubrication.measurement_restored": "還原油耗紀錄",
   "device_axle.created": "建立階軸設定",
   "device_axle.updated": "變更階軸設定",
+  "rail_wear.measurement_created": "新增軌道磨耗",
+  "rail_wear.rail_replaced": "登記換軌",
+  "rail_wear.record_corrected": "更正軌道磨耗",
 };
 
 const auditResourceLabels: Record<string, string> = {
@@ -143,6 +147,7 @@ const auditResourceLabels: Record<string, string> = {
   import_batch: "油耗資料批次",
   measurement: "油耗紀錄",
   device_axle_profile: "設備階軸設定",
+  rail_wear_record: "軌道磨耗紀錄",
 };
 
 function auditActorLabel(username: string) {

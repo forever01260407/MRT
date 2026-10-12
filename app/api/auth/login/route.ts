@@ -5,6 +5,7 @@ import {
   createSessionToken,
   enforceLoginRateLimit,
   getAuthRuntimeEnv,
+  isLocalAuthHostname,
   isRootUsername,
   resolveAuthSecret,
   serializeSessionCookie,
@@ -44,7 +45,9 @@ export async function POST(request: Request) {
     const account = rootAttempt
       ? await validateRootCredentials({ request, runtimeEnv, username, password })
       : database
-        ? await authenticateStoredUser(database, username, password, signInContext)
+        ? await authenticateStoredUser(database, username, password, signInContext, {
+            seedDevelopmentAccounts: isLocalAuthHostname(requestUrl.hostname),
+          })
         : await validateDevelopmentCredentials({ url: requestUrl, username, password });
     if (rootAttempt && database) {
       await recordSignInEvent(database, {

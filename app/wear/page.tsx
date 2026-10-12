@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import Link from "next/link";
-import { AdminNavItem, SessionMenu } from "../components/AuthSessionProvider";
+import { AdminNavItem, SessionMenu, useAuthSession } from "../components/AuthSessionProvider";
+import type { RailWearPayload, RailWearRecord, RailWearRecordType } from "../lib/railWear";
 import { predictWearTrend, projectWearAtTime } from "../lib/wearPrediction";
 import type { WearPredictionConfidence } from "../lib/wearPrediction";
 
@@ -21,6 +22,12 @@ type WearHistoryPoint = {
   wear: number;
   change: number;
   method: string;
+  recordId?: string;
+  recordType?: RailWearRecordType;
+  note?: string | null;
+  inspector?: string;
+  revisionNo?: number;
+  canEdit?: boolean;
 };
 type WearReading = {
   direction: Direction;
@@ -29,6 +36,9 @@ type WearReading = {
   change: number;
   inspectedAt: string;
   history: WearHistoryPoint[];
+  predictionHistory: WearHistoryPoint[];
+  dataState: "demo" | "stored";
+  lastReplacement: WearHistoryPoint | null;
 };
 type MonitorPoint = {
   direction: Direction;
@@ -44,6 +54,16 @@ type SegmentGeometry = { x: number; y: number; length: number; angle: number };
 type RouteLayout = {
   stationPoints: Record<string, RoutePoint>;
   segmentGeometry: Record<string, SegmentGeometry>;
+};
+
+type WearEntryForm = {
+  measuredAt: string;
+  wear: string;
+  inspector: string;
+  method: string;
+  recordType: RailWearRecordType;
+  note: string;
+  correctionReason: string;
 };
 
 const wearStations: Station[] = [
@@ -207,7 +227,17 @@ function makeReading(direction: Direction, side: RailSide, wear: number, index: 
     };
   });
   const latest = history[history.length - 1];
-  return { direction, side, wear, change: latest.change, inspectedAt: latest.date, history };
+  return {
+    direction,
+    side,
+    wear,
+    change: latest.change,
+    inspectedAt: latest.date,
+    history,
+    predictionHistory: history,
+    dataState: "demo",
+    lastReplacement: null,
+  };
 }
 
 function buildMonitorPoints(direction: Direction, assignments: readonly { numbers: readonly number[]; segmentId: string; fromId: string; toId: string }[], mode: WearMode, leftValues: number[], rightValues: number[]): MonitorPoint[] {
@@ -228,6 +258,60 @@ const treadUpMonitorPoints = buildMonitorPoints("up", upMonitorAssignments, "tre
 const treadDownMonitorPoints = buildMonitorPoints("down", downMonitorAssignments, "tread", treadDownLeftWear, treadDownRightWear);
 const sideUpMonitorPoints = buildMonitorPoints("up", upMonitorAssignments, "side", sideLeftWear, sideRightWear);
 const sideDownMonitorPoints = buildMonitorPoints("down", downMonitorAssignments, "side", sideDownLeftWear, sideDownRightWear);
+
+function mergeStoredWearRecords(basePoints: MonitorPoint[], records: RailWearRecord[]) {
+  return basePoints.map((point): MonitorPoint => ({
+    ...point,
+    readings: Object.fromEntries((["left", "right"] as RailSide[]).map((side) => {
+      const matched = records
+        .filter((record) => record.direction === point.direction && record.pointNumber === point.number && record.side === side)
+        .sort((left, right) => left.measuredAt.localeCompare(right.measuredAt) || left.updatedAt.localeCompare(right.updatedAt));
+      if (!matched.length) return [side, point.readings[side]];
+
+      let lastReplacementIndex = -1;
+      const history = matched.map((record, index): WearHistoryPoint => {
+        if (record.recordType === "replacement") lastReplacementIndex = index;
+        const previous = matched[index - 1];
+        return {
+          date: record.measuredAt,
+          wear: record.wear,
+          change: index === 0 || record.recordType === "replacement"
+            ? 0
+            : Number((record.wear - previous.wear).toFixed(2)),
+          method: record.method,
+          recordId: record.id,
+          recordType: record.recordType,
+          note: record.note,
+          inspector: record.inspector,
+          revisionNo: record.revisionNo,
+          canEdit: record.canEdit,
+        };
+      });
+      const latest = history[history.length - 1];
+      const predictionHistory = history.slice(lastReplacementIndex >= 0 ? lastReplacementIndex : 0);
+      return [side, {
+        direction: point.direction,
+        side,
+        wear: latest.wear,
+        change: latest.change,
+        inspectedAt: latest.date,
+        history,
+        predictionHistory,
+        dataState: "stored" as const,
+        lastReplacement: lastReplacementIndex >= 0 ? history[lastReplacementIndex] : null,
+      }];
+    })) as Record<RailSide, WearReading>,
+  }));
+}
+
+function taipeiDateInputValue(epochMs = Date.now()) {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(epochMs));
+}
 
 function calculateRouteLayout(width: number, height: number): RouteLayout {
   const safeWidth = Math.max(width, 760);
@@ -354,10 +438,11 @@ function WearHistoryChart({ reading, code, config, expanded = false }: {
     };
   }, [reading, code, config, expanded]);
 
-  return <div className={`wear-history-chart ${expanded ? "expanded" : ""}`} ref={chartRoot} role="img" aria-label={`${code}${config.measurement}最近七次歷史趨勢圖`} />;
+  return <div className={`wear-history-chart ${expanded ? "expanded" : ""}`} ref={chartRoot} role="img" aria-label={`${code}${config.measurement}歷史趨勢圖`} />;
 }
 
 export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }) {
+  const { user: signedInUser } = useAuthSession();
   const mapRef = useRef<HTMLDivElement>(null);
   const expandedMapRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
@@ -373,28 +458,61 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
   const [isChartExpanded, setIsChartExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [mapViewport, setMapViewport] = useState({ x: 0, y: 0, scale: 1 });
+  const [initialEpochMs] = useState(() => Date.now());
   const [currentEpochMs, setCurrentEpochMs] = useState<number | null>(null);
   const [clockSyncState, setClockSyncState] = useState<ClockSyncState>("syncing");
+  const [storedRecords, setStoredRecords] = useState<RailWearRecord[]>([]);
+  const [recordsState, setRecordsState] = useState<"loading" | "ready" | "error">("loading");
+  const [recordsMessage, setRecordsMessage] = useState("");
+  const [entryForm, setEntryForm] = useState<WearEntryForm | null>(null);
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+  const [entrySaving, setEntrySaving] = useState(false);
+  const [entryFeedback, setEntryFeedback] = useState("");
   const config = wearModeConfig[mode];
-  const monitorPoints = mode === "side" ? [...sideUpMonitorPoints, ...sideDownMonitorPoints] : [...treadUpMonitorPoints, ...treadDownMonitorPoints];
+  const monitorPoints = useMemo(() => {
+    const basePoints = mode === "side"
+      ? [...sideUpMonitorPoints, ...sideDownMonitorPoints]
+      : [...treadUpMonitorPoints, ...treadDownMonitorPoints];
+    return mergeStoredWearRecords(basePoints, storedRecords);
+  }, [mode, storedRecords]);
   const getWearStatus = (wear: number) => wearStatus(wear, mode);
   const currentRailEstimates = useMemo(() => {
     const activeConfig = wearModeConfig[mode];
-    const activePoints = mode === "side" ? [...sideUpMonitorPoints, ...sideDownMonitorPoints] : [...treadUpMonitorPoints, ...treadDownMonitorPoints];
     const estimates = new Map<string, { wear: number; status: RailStatus }>();
-    for (const point of activePoints) {
+    for (const point of monitorPoints) {
       for (const side of ["left", "right"] as RailSide[]) {
         const reading = point.readings[side];
-        const prediction = predictWearTrend(reading.history, activeConfig.warning, activeConfig.critical);
+        const prediction = predictWearTrend(reading.predictionHistory, activeConfig.warning, activeConfig.critical);
         const projection = currentEpochMs === null ? null : projectWearAtTime(prediction, currentEpochMs);
         const wear = projection?.wear ?? reading.wear;
         estimates.set(railKey(point.direction, point.number, side), { wear, status: wearStatus(wear, mode) });
       }
     }
     return estimates;
-  }, [currentEpochMs, mode]);
+  }, [currentEpochMs, mode, monitorPoints]);
   const getCurrentRailEstimate = (point: MonitorPoint, side: RailSide) => currentRailEstimates.get(railKey(point.direction, point.number, side))
     ?? { wear: point.readings[side].wear, status: getWearStatus(point.readings[side].wear) };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/rail-wear?mode=${mode}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json() as RailWearPayload & { error?: string };
+        if (!response.ok) throw new Error(payload.error || "軌道磨耗資料讀取失敗。");
+        return payload.records ?? [];
+      })
+      .then((records) => {
+        setStoredRecords(records);
+        setRecordsState("ready");
+        setRecordsMessage("");
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setRecordsState("error");
+        setRecordsMessage(error instanceof Error ? error.message : "軌道磨耗資料讀取失敗。");
+      });
+    return () => controller.abort();
+  }, [mode]);
 
   useEffect(() => {
     let disposed = false;
@@ -479,6 +597,24 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
     };
   }, [isChartExpanded]);
 
+  useEffect(() => {
+    if (!entryForm) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !entrySaving) {
+        setEntryForm(null);
+        setEditingRecordId(null);
+        setEntryFeedback("");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [entryForm, entrySaving]);
+
   const layout = useMemo(() => calculateRouteLayout(mapSize.width, mapSize.height), [mapSize]);
   const expandedLayout = useMemo(() => calculateRouteLayout(expandedMapSize.width, expandedMapSize.height), [expandedMapSize]);
   const selectedPoint = monitorPoints.find((point) => point.direction === selectedDirection && point.number === selectedPointNumber) ?? monitorPoints[4];
@@ -486,7 +622,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
   const selectedCode = railCode(selectedPoint.number, selectedRailSide);
   const selectedDisplayCode = `${directionText[selectedPoint.direction]} ${selectedCode}`;
   const selectedEstimate = getCurrentRailEstimate(selectedPoint, selectedRailSide);
-  const selectedPrediction = predictWearTrend(selectedReading.history, config.warning, config.critical);
+  const selectedPrediction = predictWearTrend(selectedReading.predictionHistory, config.warning, config.critical);
   const currentProjection = currentEpochMs === null ? null : projectWearAtTime(selectedPrediction, currentEpochMs);
   const currentEstimatedWear = selectedEstimate.wear;
   const currentEstimatedStatus = selectedEstimate.status;
@@ -519,6 +655,101 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
       const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       workspaceRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
     });
+  };
+
+  const openNewEntry = (recordType: RailWearRecordType) => {
+    setEditingRecordId(null);
+    setEntryFeedback("");
+    setEntryForm({
+      measuredAt: taipeiDateInputValue(currentEpochMs ?? Date.now()),
+      wear: recordType === "replacement" ? "0" : "",
+      inspector: signedInUser?.name || signedInUser?.username || "",
+      method: recordType === "replacement" ? "換軌後初始量測" : "手工工具量測",
+      recordType,
+      note: "",
+      correctionReason: "",
+    });
+  };
+
+  const openCorrection = (point: WearHistoryPoint) => {
+    if (!point.recordId) return;
+    const record = storedRecords.find((candidate) => candidate.id === point.recordId);
+    if (!record) return;
+    setEditingRecordId(record.id);
+    setEntryFeedback("");
+    setEntryForm({
+      measuredAt: record.measuredAt,
+      wear: String(record.wear),
+      inspector: record.inspector,
+      method: record.method,
+      recordType: record.recordType,
+      note: record.note ?? "",
+      correctionReason: "",
+    });
+  };
+
+  const closeEntry = () => {
+    if (entrySaving) return;
+    setEntryForm(null);
+    setEditingRecordId(null);
+    setEntryFeedback("");
+  };
+
+  const submitEntry = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!entryForm || entrySaving) return;
+    const wear = Number(entryForm.wear);
+    if (!Number.isFinite(wear) || wear < 0) {
+      setEntryFeedback("請輸入有效且不小於 0 的磨耗值。");
+      return;
+    }
+    if (entryForm.recordType === "replacement" && !entryForm.note.trim()) {
+      setEntryFeedback("換軌紀錄必須填寫換軌說明或工單資訊。");
+      return;
+    }
+    if (editingRecordId && !entryForm.correctionReason.trim()) {
+      setEntryFeedback("更正既有紀錄時必須填寫更正原因。");
+      return;
+    }
+
+    setEntrySaving(true);
+    setEntryFeedback("");
+    const record = {
+      mode,
+      direction: selectedPoint.direction,
+      pointNumber: selectedPoint.number,
+      side: selectedRailSide,
+      measuredAt: entryForm.measuredAt,
+      wear,
+      inspector: entryForm.inspector,
+      method: entryForm.method,
+      recordType: entryForm.recordType,
+      note: entryForm.note,
+    };
+    try {
+      const response = await fetch("/api/rail-wear", {
+        method: editingRecordId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editingRecordId
+          ? { recordId: editingRecordId, correctionReason: entryForm.correctionReason, record }
+          : record),
+      });
+      const payload = await response.json() as RailWearPayload & { error?: string; details?: string[] };
+      if (!response.ok) throw new Error(payload.details?.[0] ?? payload.error ?? "軌道磨耗紀錄儲存失敗。");
+      setStoredRecords(payload.records ?? []);
+      setRecordsState("ready");
+      setRecordsMessage(editingRecordId
+        ? `${selectedDisplayCode} 的磨耗紀錄已更正，原始版本仍保留。`
+        : entryForm.recordType === "replacement"
+          ? `${selectedDisplayCode} 已登記換軌，預測已從新軌資料重新開始。`
+          : `${selectedDisplayCode} 已新增實際磨耗量測。`);
+      setEntryForm(null);
+      setEditingRecordId(null);
+    } catch (error) {
+      setEntryFeedback(error instanceof Error ? error.message : "軌道磨耗紀錄儲存失敗。");
+    } finally {
+      setEntrySaving(false);
+    }
   };
 
   const selectDirectionFilter = (filter: DirectionFilter) => {
@@ -763,7 +994,11 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
           <article className="panel wear-detail-panel">
             <div className="wear-detail-heading">
               <div><span className="panel-kicker">目前選取 · {directionText[selectedPoint.direction]}{sideText[selectedRailSide]} · {config.measurement}</span><h3>{selectedDisplayCode}｜監測點 {selectedPoint.number}｜{selectedPoint.from.id} {selectedPoint.from.name}－{selectedPoint.to.id} {selectedPoint.to.name}</h3></div>
-              <span className={`status-pill ${selectedStatus}`}>{statusText[selectedStatus]}</span>
+              <div className="wear-detail-actions">
+                <span className={`status-pill ${selectedStatus}`}>{statusText[selectedStatus]}</span>
+                <button type="button" className="wear-entry-button" onClick={() => openNewEntry("measurement")}>＋ 登記磨耗</button>
+                <button type="button" className="wear-replacement-button" onClick={() => openNewEntry("replacement")}>↺ 登記換軌</button>
+              </div>
             </div>
 
             <div className="rail-direction-tabs" role="group" aria-label="選取左軌或右軌">
@@ -772,11 +1007,16 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
               ))}
             </div>
 
+            {recordsState === "loading" ? <div className="wear-data-notice loading">正在讀取實際磨耗紀錄…</div> : null}
+            {recordsState === "error" ? <div className="wear-data-notice error" role="alert">{recordsMessage}</div> : null}
+            {recordsState === "ready" && selectedReading.dataState === "demo" ? <div className="wear-data-notice demo">此軌道尚未登記實際磨耗，目前顯示示範值；新增第一筆紀錄後會自動改用現場資料。</div> : null}
+            {recordsState === "ready" && recordsMessage ? <div className="wear-data-notice success" role="status">{recordsMessage}</div> : null}
+
             <div className="wear-reading-grid">
               <div><span>軌道編號</span><strong>{selectedDisplayCode}</strong></div>
               <div><span>{config.measurement}</span><strong>{selectedReading.wear.toFixed(2)} mm</strong></div>
               <div><span>Excel 項次</span><strong>{selectedPoint.number}</strong></div>
-              <div><span>較前次增加</span><strong>+{selectedReading.change.toFixed(2)} mm</strong></div>
+              <div><span>較前次變化</span><strong>{selectedReading.lastReplacement?.date === selectedReading.inspectedAt ? "換軌重置" : `${selectedReading.change >= 0 ? "+" : ""}${selectedReading.change.toFixed(2)} mm`}</strong></div>
               <div><span>最近巡檢日期</span><strong>{selectedReading.inspectedAt}</strong></div>
               <div><span>維修值</span><strong>{config.critical.toFixed(1)} mm</strong></div>
             </div>
@@ -805,25 +1045,37 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
               </div>
               <footer>
                 <span><strong>當下推估範圍</strong> {currentProjection ? currentProjection.withinReliableHorizon ? "仍在可信範圍" : "已超出可信範圍" : "同步中…"}</span>
-                <p>從最近量測日推估至 Cloudflare 同步的台北現在時間；當下推估不能取代現場巡檢與正式維修判定。</p>
+                <p>{selectedReading.lastReplacement
+                  ? `已確認 ${selectedReading.lastReplacement.date} 換軌；磨耗率與預測只使用該次換軌後的 ${selectedReading.predictionHistory.length} 筆資料。`
+                  : "從最近量測日推估至 Cloudflare 同步的台北現在時間；當下推估不能取代現場巡檢與正式維修判定。"}</p>
               </footer>
             </section>
           </article>
 
           <article className="panel wear-history-panel">
             <div className="wear-history-heading">
-              <div><span className="panel-kicker">歷史資料 · 隨目前軌道自動更新</span><h3>{selectedDisplayCode} · {selectedPoint.from.name}－{selectedPoint.to.name}</h3><p>顯示{directionText[selectedPoint.direction]}{sideText[selectedRailSide]}最近七次{config.measurement}趨勢。</p></div>
+              <div><span className="panel-kicker">歷史資料 · 量測與換軌事件</span><h3>{selectedDisplayCode} · {selectedPoint.from.name}－{selectedPoint.to.name}</h3><p>{selectedReading.dataState === "stored" ? `顯示${directionText[selectedPoint.direction]}${sideText[selectedRailSide]}的實際登記紀錄；換軌後預測會重新起算。` : "目前尚無實際登記資料，以下內容為示範趨勢。"}</p></div>
               <button type="button" className="expand-chart-button" onClick={() => setIsChartExpanded(true)} aria-haspopup="dialog"><i aria-hidden="true">⛶</i>放大圖表</button>
             </div>
             <WearHistoryChart reading={selectedReading} code={selectedDisplayCode} config={config} />
             <div className="wear-history-table-shell">
               <table className="wear-history-table">
-                <caption>{selectedDisplayCode} {sideText[selectedRailSide]}逐次量測紀錄（示範資料）</caption>
-                <thead><tr><th scope="col">量測日期</th><th scope="col">軌道編號</th><th scope="col">{config.measurement}</th><th scope="col">較前次</th><th scope="col">狀態</th><th scope="col">資料來源</th></tr></thead>
+                <caption>{selectedDisplayCode} {sideText[selectedRailSide]}逐次紀錄（{selectedReading.dataState === "stored" ? "實際登記資料" : "示範資料"}）</caption>
+                <thead><tr><th scope="col">日期</th><th scope="col">軌道編號</th><th scope="col">事件</th><th scope="col">{config.measurement}</th><th scope="col">較前次</th><th scope="col">狀態</th><th scope="col">量測資訊</th><th scope="col">操作</th></tr></thead>
                 <tbody>
                   {[...selectedReading.history].reverse().map((point) => {
                     const pointStatus = getWearStatus(point.wear);
-                    return <tr key={point.date}><td>{point.date}</td><td><strong>{selectedDisplayCode}</strong></td><td><strong>{point.wear.toFixed(2)} mm</strong></td><td className={point.change > 0 ? "wear-increase" : ""}>{point.change === 0 ? "起始" : `+${point.change.toFixed(2)} mm`}</td><td><span className={`wear-history-status ${pointStatus}`}>{statusText[pointStatus]}</span></td><td>{point.method}</td></tr>;
+                    const isReplacement = point.recordType === "replacement";
+                    return <tr key={point.recordId ?? point.date} className={isReplacement ? "wear-replacement-row" : undefined}>
+                      <td>{point.date}</td>
+                      <td><strong>{selectedDisplayCode}</strong></td>
+                      <td><span className={`wear-event-badge ${isReplacement ? "replacement" : "measurement"}`}>{isReplacement ? "已換軌" : "量測"}</span>{point.note ? <small className="wear-row-note">{point.note}</small> : null}</td>
+                      <td><strong>{point.wear.toFixed(2)} mm</strong></td>
+                      <td className={point.change > 0 ? "wear-increase" : ""}>{isReplacement ? "重新起算" : point.change === 0 ? "起始" : `${point.change >= 0 ? "+" : ""}${point.change.toFixed(2)} mm`}</td>
+                      <td><span className={`wear-history-status ${pointStatus}`}>{statusText[pointStatus]}</span></td>
+                      <td><strong>{point.inspector ?? "示範資料"}</strong><small className="wear-row-note">{point.method}{point.revisionNo ? ` · 已更正 v${point.revisionNo}` : ""}</small></td>
+                      <td>{point.recordId && point.canEdit ? <button type="button" className="wear-correction-button" onClick={() => openCorrection(point)}>更正</button> : <span className="wear-no-action">—</span>}</td>
+                    </tr>;
                   })}
                 </tbody>
               </table>
@@ -854,6 +1106,83 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
           </div>
         </section>
       </section>
+
+      {entryForm ? (
+        <div className="manual-entry-backdrop wear-entry-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeEntry(); }}>
+          <section className="manual-entry-modal wear-entry-modal" role="dialog" aria-modal="true" aria-labelledby="wear-entry-title" aria-describedby="wear-entry-description">
+            <header className="manual-entry-modal-header">
+              <div>
+                <span className="panel-kicker">{editingRecordId ? "APPEND CORRECTION VERSION" : entryForm.recordType === "replacement" ? "RAIL REPLACEMENT EVENT" : "RAIL WEAR MEASUREMENT"}</span>
+                <h3 id="wear-entry-title"><span aria-hidden="true">{entryForm.recordType === "replacement" ? "↺" : "+"}</span>{editingRecordId ? "更正磨耗紀錄" : entryForm.recordType === "replacement" ? "登記換軌" : "登記軌道磨耗"}</h3>
+                <p id="wear-entry-description">{editingRecordId ? "系統會保留原始值，並新增更正版本。" : entryForm.recordType === "replacement" ? "換軌事件會清楚標示在歷程中，後續預測只使用新軌資料。" : "輸入現場實測值後，總覽、圖表與預測會立即改用實際資料。"}</p>
+              </div>
+              <button type="button" className="manual-entry-close" onClick={closeEntry} disabled={entrySaving} aria-label="關閉磨耗登記視窗">×</button>
+            </header>
+
+            <form className="manual-entry-form wear-entry-form" onSubmit={submitEntry} aria-busy={entrySaving}>
+              <label className="manual-entry-field full-width">
+                <span>軌道位置</span>
+                <input value={`${mode === "tread" ? "正面" : "側面"}｜${selectedDisplayCode}｜${selectedPoint.from.name}－${selectedPoint.to.name}`} readOnly aria-readonly="true" />
+              </label>
+
+              <div className="manual-entry-field-row">
+                <label className="manual-entry-field">
+                  <span>紀錄類型 <b>*</b></span>
+                  <select value={entryForm.recordType} onChange={(event) => {
+                    const recordType = event.target.value as RailWearRecordType;
+                    setEntryForm((current) => current ? {
+                      ...current,
+                      recordType,
+                      wear: recordType === "replacement" && !editingRecordId ? "0" : current.wear,
+                      method: recordType === "replacement" ? "換軌後初始量測" : current.method === "換軌後初始量測" ? "手工工具量測" : current.method,
+                    } : current);
+                  }} disabled={entrySaving}>
+                    <option value="measurement">現場量測</option>
+                    <option value="replacement">換軌紀錄</option>
+                  </select>
+                </label>
+                <label className="manual-entry-field">
+                  <span>量測／換軌日期 <b>*</b></span>
+                  <input type="date" value={entryForm.measuredAt} max={taipeiDateInputValue(currentEpochMs ?? initialEpochMs)} onChange={(event) => setEntryForm({ ...entryForm, measuredAt: event.target.value })} disabled={entrySaving} required />
+                </label>
+              </div>
+
+              <div className="manual-entry-field-row">
+                <label className="manual-entry-field">
+                  <span>{entryForm.recordType === "replacement" ? "換軌後初始磨耗" : config.measurement}（mm）<b>*</b></span>
+                  <input type="number" min="0" max={mode === "side" ? 20 : 30} step="0.01" inputMode="decimal" value={entryForm.wear} onChange={(event) => setEntryForm({ ...entryForm, wear: event.target.value })} disabled={entrySaving} placeholder="例如：2.35" autoFocus required />
+                </label>
+                <label className="manual-entry-field">
+                  <span>量測人員 <b>*</b></span>
+                  <input value={entryForm.inspector} onChange={(event) => setEntryForm({ ...entryForm, inspector: event.target.value })} disabled={entrySaving || signedInUser?.role === "user"} required />
+                </label>
+              </div>
+
+              <label className="manual-entry-field full-width">
+                <span>量測方式 <b>*</b></span>
+                <input list="wear-method-options" value={entryForm.method} onChange={(event) => setEntryForm({ ...entryForm, method: event.target.value })} disabled={entrySaving} required />
+                <datalist id="wear-method-options"><option value="手工工具量測" /><option value="軌道檢測車" /><option value="換軌後初始量測" /></datalist>
+              </label>
+
+              <label className="manual-entry-field full-width">
+                <span>{entryForm.recordType === "replacement" ? "換軌說明／工單資訊" : "備註"}{entryForm.recordType === "replacement" ? <b> *</b> : null}</span>
+                <textarea value={entryForm.note} onChange={(event) => setEntryForm({ ...entryForm, note: event.target.value })} disabled={entrySaving} maxLength={500} placeholder={entryForm.recordType === "replacement" ? "例如：工單編號、換軌範圍、施工班別" : "可填寫量測位置或現場狀況"} required={entryForm.recordType === "replacement"} />
+              </label>
+
+              {editingRecordId ? <label className="manual-entry-field full-width">
+                <span>更正原因 <b>*</b></span>
+                <input value={entryForm.correctionReason} onChange={(event) => setEntryForm({ ...entryForm, correctionReason: event.target.value })} disabled={entrySaving} maxLength={500} placeholder="例如：原量測值誤植" required />
+              </label> : null}
+
+              {entryFeedback ? <div className="manual-entry-error" role="alert">{entryFeedback}</div> : null}
+              <footer className="manual-entry-form-actions">
+                <button type="button" className="manual-entry-cancel" onClick={closeEntry} disabled={entrySaving}>取消</button>
+                <button type="submit" className="manual-entry-submit" disabled={entrySaving}>{entrySaving ? "正在儲存…" : editingRecordId ? "確認更正並保留原始值" : entryForm.recordType === "replacement" ? "確認登記換軌" : "儲存磨耗紀錄"}</button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      ) : null}
 
       {isExpanded && (
         <div className="map-modal-backdrop" role="presentation">
