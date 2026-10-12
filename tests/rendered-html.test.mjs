@@ -339,6 +339,7 @@ test("server-renders the operational admin area framework", async () => {
 test("persists admin-created accounts in D1 and uses them for login", async () => {
   const page = await readFile(new URL("../app/admin-area/page.tsx", import.meta.url), "utf8");
   const route = await readFile(new URL("../app/api/admin/users/route.ts", import.meta.url), "utf8");
+  const auth = await readFile(new URL("../app/lib/auth.ts", import.meta.url), "utf8");
   const loginRoute = await readFile(new URL("../app/api/auth/login/route.ts", import.meta.url), "utf8");
   const userStore = await readFile(new URL("../app/lib/userStore.ts", import.meta.url), "utf8");
   const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
@@ -353,6 +354,7 @@ test("persists admin-created accounts in D1 and uses them for login", async () =
   assert.doesNotMatch(route, /forcePasswordChange|const name =/);
   assert.match(loginRoute, /authenticateStoredUser/);
   assert.match(userStore, /PBKDF2|createPasswordCredential/);
+  assert.match(auth, /const passwordHashIterations = 100_000/);
   assert.match(userStore, /INSERT INTO users/);
   assert.match(userStore, /INSERT OR IGNORE INTO users/);
   assert.match(userStore, /name: row\.username/);

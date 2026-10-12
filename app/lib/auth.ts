@@ -65,7 +65,8 @@ const developmentAccounts: DevelopmentAccount[] = [
 
 const localDevelopmentSecret = "mrt-monitor-local-only-session-signing-secret-v1";
 const textEncoder = new TextEncoder();
-const passwordHashIterations = 120_000;
+// Cloudflare Workers Web Crypto rejects PBKDF2 iteration counts above 100,000.
+const passwordHashIterations = 100_000;
 
 export type PasswordCredential = {
   hash: string;
