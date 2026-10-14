@@ -37,7 +37,7 @@ type WearReading = {
   inspectedAt: string;
   history: WearHistoryPoint[];
   predictionHistory: WearHistoryPoint[];
-  dataState: "demo" | "stored";
+  dataState: "historical" | "stored";
   lastReplacement: WearHistoryPoint | null;
 };
 type MonitorPoint = {
@@ -248,7 +248,7 @@ function makeReading(direction: Direction, side: RailSide, wear: number, index: 
     inspectedAt: latest.date,
     history,
     predictionHistory: history,
-    dataState: "demo",
+    dataState: "historical",
     lastReplacement: null,
   };
 }
@@ -1161,13 +1161,13 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
 
           <article className="panel wear-history-panel">
             <div className="wear-history-heading">
-              <div><span className="panel-kicker">歷史資料 · 量測與換軌事件</span><h3>{selectedDisplayCode} · {selectedPoint.from.name}－{selectedPoint.to.name}</h3><p>{selectedReading.dataState === "stored" ? `顯示${directionText[selectedPoint.direction]}${sideText[selectedRailSide]}的實際登記紀錄；換軌後預測會重新起算。` : "目前尚無實際登記資料，以下內容為示範趨勢。"}</p></div>
+              <div><span className="panel-kicker">歷史資料 · 量測與換軌事件</span><h3>{selectedDisplayCode} · {selectedPoint.from.name}－{selectedPoint.to.name}</h3><p>{selectedReading.dataState === "stored" ? `顯示${directionText[selectedPoint.direction]}${sideText[selectedRailSide]}的實際登記紀錄；換軌後預測會重新起算。` : "目前尚無實際登記資料，以下內容為歷史趨勢資料。"}</p></div>
               <button type="button" className="expand-chart-button" onClick={() => setIsChartExpanded(true)} aria-haspopup="dialog"><i aria-hidden="true">⛶</i>放大圖表</button>
             </div>
             <WearHistoryChart reading={selectedReading} code={selectedDisplayCode} config={config} />
             <div className="wear-history-table-shell">
               <table className="wear-history-table">
-                <caption>{selectedDisplayCode} {sideText[selectedRailSide]}逐次紀錄（{selectedReading.dataState === "stored" ? "實際登記資料" : "示範資料"}）</caption>
+                <caption>{selectedDisplayCode} {sideText[selectedRailSide]}逐次紀錄（{selectedReading.dataState === "stored" ? "實際登記資料" : "歷史資料"}）</caption>
                 <thead><tr><th scope="col">日期</th><th scope="col">軌道編號</th><th scope="col">事件</th><th scope="col">{config.measurement}</th><th scope="col">較前次</th><th scope="col">狀態</th><th scope="col">量測資訊</th><th scope="col">操作</th></tr></thead>
                 <tbody>
                   {[...selectedReading.history].reverse().map((point) => {
@@ -1181,7 +1181,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
                       <td><strong>{point.wear.toFixed(2)} mm</strong></td>
                       <td className={point.change > 0 ? "wear-increase" : ""}>{isReplacement ? "重新起算" : point.change === 0 ? "起始" : `${point.change >= 0 ? "+" : ""}${point.change.toFixed(2)} mm`}</td>
                       <td><span className={`wear-history-status ${pointStatus}`}>{statusText[pointStatus]}</span></td>
-                      <td><strong>{point.inspector ?? "示範資料"}</strong><small className="wear-row-note">{point.method}{point.revisionNo ? ` · 已更正 v${point.revisionNo}` : ""}</small></td>
+                      <td><strong>{point.inspector ?? "歷史資料"}</strong><small className="wear-row-note">{point.method}{point.revisionNo ? ` · 已更正 v${point.revisionNo}` : ""}</small></td>
                       <td>{storedRecord ? <div className="wear-row-actions">
                         {point.canEdit ? <button type="button" className="wear-correction-button" onClick={() => openCorrection(point)}>更正</button> : null}
                         {canDelete ? <button type="button" className="wear-delete-button" onClick={() => openRecordAction("delete", storedRecord)}>刪除</button> : null}

@@ -591,6 +591,15 @@ test("server-renders Cloudflare-synchronized current tread and side-wear estimat
   assert.match(sideHtml, /維修值 (?:<!-- -->)?8(?:\.0)?(?:<!-- -->)? mm/);
 });
 
+test("labels built-in rail baselines as historical data instead of demo data", async () => {
+  const page = await readFile(new URL("../app/wear/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /dataState: "historical" \| "stored"/);
+  assert.match(page, /以下內容為歷史趨勢資料/);
+  assert.match(page, /"實際登記資料" : "歷史資料"/);
+  assert.doesNotMatch(page, /示範資料|dataState: "demo"/);
+});
+
 test("colors current rail status surfaces from the projected value", async () => {
   const page = await readFile(new URL("../app/wear/page.tsx", import.meta.url), "utf8");
 
