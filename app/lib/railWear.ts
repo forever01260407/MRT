@@ -26,8 +26,23 @@ export type RailWearRecord = RailWearRecordFields & {
   createdAt: string;
   updatedAt: string;
   canEdit: boolean;
+  deletion: {
+    deletedAt: string;
+    deletedBy: string;
+    deletedIp: string;
+    deleteReason: string;
+  } | null;
+  lifecycleEvents: Array<{
+    id: string;
+    action: "deleted" | "restored";
+    reason: string;
+    actor: string;
+    sourceIp: string;
+    createdAt: string;
+  }>;
 };
 
 export type RailWearPayload = {
   records: RailWearRecord[];
+  deletedRecords: RailWearRecord[];
 };

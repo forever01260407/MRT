@@ -218,7 +218,7 @@ async function listOptionalRows<T>(database: D1Database, query: string): Promise
 export async function listUnifiedAuditEvents(database: D1Database, limit = 1000) {
   await ensureAuditEventsTable(database);
   const boundedLimit = Math.max(1, Math.min(1000, Math.trunc(limit)));
-  const [stored, users, signIns, imports, revisions, lifecycle, axleEvents] = await Promise.all([
+  const [stored, users, signIns, imports, revisions, lifecycle, axleEvents, railWearLifecycle] = await Promise.all([
     database.prepare(`SELECT id, occurred_at, actor_user_id, actor_username, actor_role, source_ip,
         user_agent, request_id, action, resource_type, resource_id, resource_label, before_json,
         after_json, reason, result, error_code, metadata_json, origin_type, origin_id
@@ -242,6 +242,8 @@ export async function listUnifiedAuditEvents(database: D1Database, limit = 1000)
     listOptionalRows<{ id: string; device_id: string; previous_stage_count: number | null; stage_count: number; previous_axle_count: number | null; axle_count: number; previous_effective_date: string | null; effective_date: string; changed_by: string; source_ip: string; created_at: string }>(database, `SELECT id, device_id, previous_stage_count, stage_count, previous_axle_count,
         axle_count, previous_effective_date, effective_date, changed_by, source_ip, created_at
       FROM device_axle_profile_events`),
+    listOptionalRows<{ id: string; record_id: string; action: "deleted" | "restored"; reason: string; actor: string; source_ip: string; created_at: string }>(database,
+      "SELECT id, record_id, action, reason, actor, source_ip, created_at FROM rail_wear_lifecycle_events"),
   ]);
 
   const current = stored.results.map((row) => rowToAuditEvent(row));
@@ -345,6 +347,23 @@ export async function listUnifiedAuditEvents(database: D1Database, limit = 1000)
     after: { stageCount: event.stage_count, axleCount: event.axle_count, effectiveDate: event.effective_date },
     result: "success",
     originType: "device_axle_profile_event",
+    originId: event.id,
+  })));
+
+  railWearLifecycle.forEach((event) => addLegacy(legacyEvent({
+    id: `LEGACY-RAIL-LIFECYCLE-${event.id}`,
+    occurredAt: event.created_at,
+    actorUsername: event.actor,
+    sourceIp: event.source_ip,
+    action: event.action === "deleted" ? "rail_wear.record_soft_deleted" : "rail_wear.record_restored",
+    resourceType: "rail_wear_record",
+    resourceId: event.record_id,
+    resourceLabel: event.record_id,
+    before: { status: event.action === "deleted" ? "active" : "deleted" },
+    after: { status: event.action === "deleted" ? "deleted" : "active" },
+    reason: event.reason,
+    result: "success",
+    originType: "rail_wear_lifecycle",
     originId: event.id,
   })));
 

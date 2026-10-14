@@ -93,6 +93,15 @@ export async function proxy(request: NextRequest) {
       return NextResponse.json({ error: "只有 POWER USER 或 ADMIN 可以從垃圾桶還原紀錄。" }, { status: 403 });
     }
 
+    if (pathname === "/api/rail-wear" && request.method === "DELETE" && effectiveSession.role === "user") {
+      return NextResponse.json({ error: "只有 AD USER、POWER USER、ADMIN 或 ROOT 可以刪除軌道紀錄。" }, { status: 403 });
+    }
+
+    if (pathname === "/api/rail-wear" && request.method === "PUT"
+      && (effectiveSession.role === "user" || effectiveSession.role === "userpro")) {
+      return NextResponse.json({ error: "只有 POWER USER、ADMIN 或 ROOT 可以從垃圾桶還原軌道紀錄。" }, { status: 403 });
+    }
+
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("x-mrt-username", effectiveSession.username);
     requestHeaders.set("x-mrt-role", effectiveSession.role);

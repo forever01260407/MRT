@@ -139,6 +139,8 @@ const auditActionLabels: Record<string, string> = {
   "rail_wear.measurement_created": "新增軌道磨耗",
   "rail_wear.rail_replaced": "登記換軌",
   "rail_wear.record_corrected": "更正軌道磨耗",
+  "rail_wear.record_soft_deleted": "刪除軌道磨耗",
+  "rail_wear.record_restored": "還原軌道磨耗",
 };
 
 const auditResourceLabels: Record<string, string> = {

@@ -66,6 +66,11 @@ type WearEntryForm = {
   correctionReason: string;
 };
 
+type RailWearLifecycleAction = {
+  kind: "delete" | "restore";
+  record: RailWearRecord;
+};
+
 const wearStations: Station[] = [
   { id: "Y19", name: "新北產業園區" },
   { id: "Y18", name: "幸福" },
@@ -187,6 +192,14 @@ const taipeiDateTimeFormatter = new Intl.DateTimeFormat("zh-TW", {
 
 function formatTaipeiDateTime(epochMs: number) {
   return taipeiDateTimeFormatter.format(new Date(epochMs));
+}
+
+function formatStoredTaipeiDateTime(value: string) {
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+    ? `${value.replace(" ", "T")}Z`
+    : value;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? value : taipeiDateTimeFormatter.format(date);
 }
 
 function wearStatus(wear: number, mode: WearMode): RailStatus {
@@ -462,13 +475,21 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
   const [currentEpochMs, setCurrentEpochMs] = useState<number | null>(null);
   const [clockSyncState, setClockSyncState] = useState<ClockSyncState>("syncing");
   const [storedRecords, setStoredRecords] = useState<RailWearRecord[]>([]);
+  const [deletedRecords, setDeletedRecords] = useState<RailWearRecord[]>([]);
   const [recordsState, setRecordsState] = useState<"loading" | "ready" | "error">("loading");
   const [recordsMessage, setRecordsMessage] = useState("");
   const [entryForm, setEntryForm] = useState<WearEntryForm | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [entrySaving, setEntrySaving] = useState(false);
   const [entryFeedback, setEntryFeedback] = useState("");
+  const [recordAction, setRecordAction] = useState<RailWearLifecycleAction | null>(null);
+  const [actionReason, setActionReason] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [actionSaving, setActionSaving] = useState(false);
+  const [awaitingFinalDeleteConfirmation, setAwaitingFinalDeleteConfirmation] = useState(false);
   const config = wearModeConfig[mode];
+  const canDelete = signedInUser?.role === "userpro" || signedInUser?.role === "supervisor" || signedInUser?.role === "admin" || signedInUser?.role === "root";
+  const canRestore = signedInUser?.role === "supervisor" || signedInUser?.role === "admin" || signedInUser?.role === "root";
   const monitorPoints = useMemo(() => {
     const basePoints = mode === "side"
       ? [...sideUpMonitorPoints, ...sideDownMonitorPoints]
@@ -499,10 +520,14 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
       .then(async (response) => {
         const payload = await response.json() as RailWearPayload & { error?: string };
         if (!response.ok) throw new Error(payload.error || "軌道磨耗資料讀取失敗。");
-        return payload.records ?? [];
+        return {
+          records: payload.records ?? [],
+          deletedRecords: payload.deletedRecords ?? [],
+        };
       })
-      .then((records) => {
-        setStoredRecords(records);
+      .then((payload) => {
+        setStoredRecords(payload.records);
+        setDeletedRecords(payload.deletedRecords);
         setRecordsState("ready");
         setRecordsMessage("");
       })
@@ -615,12 +640,36 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
     };
   }, [entryForm, entrySaving]);
 
+  useEffect(() => {
+    if (!recordAction) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !actionSaving) {
+        setRecordAction(null);
+        setActionReason("");
+        setActionError("");
+        setAwaitingFinalDeleteConfirmation(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [recordAction, actionSaving]);
+
   const layout = useMemo(() => calculateRouteLayout(mapSize.width, mapSize.height), [mapSize]);
   const expandedLayout = useMemo(() => calculateRouteLayout(expandedMapSize.width, expandedMapSize.height), [expandedMapSize]);
   const selectedPoint = monitorPoints.find((point) => point.direction === selectedDirection && point.number === selectedPointNumber) ?? monitorPoints[4];
   const selectedReading = selectedPoint.readings[selectedRailSide];
   const selectedCode = railCode(selectedPoint.number, selectedRailSide);
   const selectedDisplayCode = `${directionText[selectedPoint.direction]} ${selectedCode}`;
+  const selectedDeletedRecords = deletedRecords
+    .filter((record) => record.direction === selectedPoint.direction
+      && record.pointNumber === selectedPoint.number
+      && record.side === selectedRailSide)
+    .sort((left, right) => right.measuredAt.localeCompare(left.measuredAt) || right.updatedAt.localeCompare(left.updatedAt));
   const selectedEstimate = getCurrentRailEstimate(selectedPoint, selectedRailSide);
   const selectedPrediction = predictWearTrend(selectedReading.predictionHistory, config.warning, config.critical);
   const currentProjection = currentEpochMs === null ? null : projectWearAtTime(selectedPrediction, currentEpochMs);
@@ -695,6 +744,63 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
     setEntryFeedback("");
   };
 
+  const openRecordAction = (kind: "delete" | "restore", record: RailWearRecord) => {
+    setRecordAction({ kind, record });
+    setActionReason("");
+    setActionError("");
+    setAwaitingFinalDeleteConfirmation(false);
+  };
+
+  const closeRecordAction = () => {
+    if (actionSaving) return;
+    setRecordAction(null);
+    setActionReason("");
+    setActionError("");
+    setAwaitingFinalDeleteConfirmation(false);
+  };
+
+  const submitRecordAction = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!recordAction || actionSaving) return;
+    const reason = actionReason.trim();
+    if (!reason) {
+      setActionError(recordAction.kind === "delete" ? "請填寫刪除原因。" : "請填寫還原原因。");
+      return;
+    }
+    if (recordAction.kind === "delete" && !awaitingFinalDeleteConfirmation) {
+      setActionError("");
+      setAwaitingFinalDeleteConfirmation(true);
+      return;
+    }
+
+    setActionSaving(true);
+    setActionError("");
+    try {
+      const response = await fetch("/api/rail-wear", {
+        method: recordAction.kind === "delete" ? "DELETE" : "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(recordAction.kind === "delete"
+          ? { recordId: recordAction.record.id, deleteReason: reason }
+          : { recordId: recordAction.record.id, restoreReason: reason }),
+      });
+      const payload = await response.json() as RailWearPayload & { error?: string; details?: string[] };
+      if (!response.ok) throw new Error(payload.details?.[0] ?? payload.error ?? "軌道紀錄異動失敗。");
+      setStoredRecords(payload.records ?? []);
+      setDeletedRecords(payload.deletedRecords ?? []);
+      const actionLabel = recordAction.kind === "delete"
+        ? "已標註失效並移至垃圾桶，不再參與總覽、圖表與預測。"
+        : "已還原，並重新納入總覽、圖表與預測。";
+      setRecordsMessage(`${directionText[recordAction.record.direction]} ${railCode(recordAction.record.pointNumber, recordAction.record.side)}｜${recordAction.record.measuredAt} ${actionLabel}`);
+      setRecordAction(null);
+      setActionReason("");
+      setAwaitingFinalDeleteConfirmation(false);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "軌道紀錄異動失敗。");
+    } finally {
+      setActionSaving(false);
+    }
+  };
+
   const submitEntry = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!entryForm || entrySaving) return;
@@ -737,6 +843,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
       const payload = await response.json() as RailWearPayload & { error?: string; details?: string[] };
       if (!response.ok) throw new Error(payload.details?.[0] ?? payload.error ?? "軌道磨耗紀錄儲存失敗。");
       setStoredRecords(payload.records ?? []);
+      setDeletedRecords(payload.deletedRecords ?? []);
       setRecordsState("ready");
       setRecordsMessage(editingRecordId
         ? `${selectedDisplayCode} 的磨耗紀錄已更正，原始版本仍保留。`
@@ -1066,6 +1173,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
                   {[...selectedReading.history].reverse().map((point) => {
                     const pointStatus = getWearStatus(point.wear);
                     const isReplacement = point.recordType === "replacement";
+                    const storedRecord = point.recordId ? storedRecords.find((record) => record.id === point.recordId) : null;
                     return <tr key={point.recordId ?? point.date} className={isReplacement ? "wear-replacement-row" : undefined}>
                       <td>{point.date}</td>
                       <td><strong>{selectedDisplayCode}</strong></td>
@@ -1074,12 +1182,32 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
                       <td className={point.change > 0 ? "wear-increase" : ""}>{isReplacement ? "重新起算" : point.change === 0 ? "起始" : `${point.change >= 0 ? "+" : ""}${point.change.toFixed(2)} mm`}</td>
                       <td><span className={`wear-history-status ${pointStatus}`}>{statusText[pointStatus]}</span></td>
                       <td><strong>{point.inspector ?? "示範資料"}</strong><small className="wear-row-note">{point.method}{point.revisionNo ? ` · 已更正 v${point.revisionNo}` : ""}</small></td>
-                      <td>{point.recordId && point.canEdit ? <button type="button" className="wear-correction-button" onClick={() => openCorrection(point)}>更正</button> : <span className="wear-no-action">—</span>}</td>
+                      <td>{storedRecord ? <div className="wear-row-actions">
+                        {point.canEdit ? <button type="button" className="wear-correction-button" onClick={() => openCorrection(point)}>更正</button> : null}
+                        {canDelete ? <button type="button" className="wear-delete-button" onClick={() => openRecordAction("delete", storedRecord)}>刪除</button> : null}
+                        {!point.canEdit && !canDelete ? <span className="wear-no-action">—</span> : null}
+                      </div> : <span className="wear-no-action">—</span>}</td>
                     </tr>;
                   })}
                 </tbody>
               </table>
             </div>
+            <section className="wear-trash-section" aria-labelledby="wear-trash-title">
+              <header><div><span className="panel-kicker">TRASH · EXCLUDED FROM PREDICTION</span><h4 id="wear-trash-title">失效紀錄（不參與預測）</h4></div><strong>{selectedDeletedRecords.length} 筆</strong></header>
+              {selectedDeletedRecords.length ? <div className="wear-history-table-shell wear-trash-table-shell">
+                <table className="wear-history-table wear-trash-table">
+                  <thead><tr><th>日期</th><th>事件</th><th>失效前數值</th><th>刪除原因</th><th>刪除者／時間</th><th>操作</th></tr></thead>
+                  <tbody>{selectedDeletedRecords.map((record) => <tr key={record.id} className="wear-deleted-row">
+                    <td>{record.measuredAt}</td>
+                    <td><span className="wear-event-badge deleted">{record.recordType === "replacement" ? "換軌紀錄" : "量測"}</span></td>
+                    <td><strong>{record.wear.toFixed(2)} mm</strong></td>
+                    <td className="wear-trash-reason">{record.deletion?.deleteReason ?? "—"}</td>
+                    <td><strong>@{record.deletion?.deletedBy ?? "未知"}</strong><small className="wear-row-note">{record.deletion ? formatStoredTaipeiDateTime(record.deletion.deletedAt) : "—"}</small></td>
+                    <td>{canRestore ? <button type="button" className="wear-restore-button" onClick={() => openRecordAction("restore", record)}>還原</button> : <span className="wear-no-action">目前角色不可還原</span>}</td>
+                  </tr>)}</tbody>
+                </table>
+              </div> : <p className="wear-trash-empty">目前選取的軌道沒有失效紀錄。</p>}
+            </section>
           </article>
         </section>
 
@@ -1178,6 +1306,39 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
               <footer className="manual-entry-form-actions">
                 <button type="button" className="manual-entry-cancel" onClick={closeEntry} disabled={entrySaving}>取消</button>
                 <button type="submit" className="manual-entry-submit" disabled={entrySaving}>{entrySaving ? "正在儲存…" : editingRecordId ? "確認更正並保留原始值" : entryForm.recordType === "replacement" ? "確認登記換軌" : "儲存磨耗紀錄"}</button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {recordAction ? (
+        <div className="manual-entry-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeRecordAction(); }}>
+          <section className={`manual-entry-modal ${recordAction.kind === "delete" ? "monitor-delete-modal" : "monitor-restore-modal"}`} role="dialog" aria-modal="true" aria-labelledby="wear-record-action-title" aria-describedby="wear-record-action-description">
+            <header className="manual-entry-modal-header">
+              <div>
+                <span className="panel-kicker">{recordAction.kind === "delete" ? "SOFT DELETE · PRESERVE HISTORY" : "RESTORE RECORD"}</span>
+                <h3 id="wear-record-action-title" className={recordAction.kind === "delete" ? "monitor-delete-title" : "monitor-restore-title"}><span aria-hidden="true">{recordAction.kind === "delete" ? "🗑" : "↺"}</span>{recordAction.kind === "delete" ? "將軌道紀錄移至垃圾桶" : "還原軌道紀錄"}</h3>
+                <p id="wear-record-action-description">{recordAction.kind === "delete" ? "原始值與完整歷程會保留，但會立即從總覽、圖表與磨耗預測排除。" : "還原後會重新納入總覽、圖表與磨耗預測，先前的刪除歷程仍會保留。"}</p>
+              </div>
+              <button type="button" className="manual-entry-close" onClick={closeRecordAction} disabled={actionSaving} aria-label="關閉軌道紀錄異動視窗">×</button>
+            </header>
+            <form className="manual-entry-form" onSubmit={submitRecordAction} aria-busy={actionSaving}>
+              <div className={recordAction.kind === "delete" ? "monitor-delete-warning" : "monitor-restore-summary"}>
+                <span>{recordAction.kind === "delete" ? "將標註失效" : "將還原"}</span>
+                <strong>{recordAction.record.mode === "tread" ? "正面" : "側面"}｜{directionText[recordAction.record.direction]} {railCode(recordAction.record.pointNumber, recordAction.record.side)}｜{recordAction.record.measuredAt}</strong>
+                <p>{recordAction.record.recordType === "replacement" ? "換軌紀錄" : "量測紀錄"}｜{recordAction.record.wear.toFixed(2)} mm｜{recordAction.record.inspector}</p>
+              </div>
+              <label className="manual-entry-field">
+                <span>{recordAction.kind === "delete" ? "刪除原因" : "還原原因"} <b>*</b></span>
+                <input value={actionReason} onChange={(event) => setActionReason(event.target.value)} disabled={actionSaving || awaitingFinalDeleteConfirmation} maxLength={500} placeholder={recordAction.kind === "delete" ? "例如：誤登換軌、監測點選錯" : "例如：確認原紀錄正確"} required />
+              </label>
+              {recordAction.kind === "delete" && awaitingFinalDeleteConfirmation ? <div className="monitor-delete-final-note"><strong>請再確認一次</strong><span>這筆紀錄將不再影響磨耗趨勢與預測；如需恢復，必須由 POWER USER、ADMIN 或 ROOT 從失效紀錄還原。</span></div> : null}
+              {recordAction.kind === "restore" ? <div className="monitor-restore-note"><strong>還原會重新影響預測結果。</strong><span>系統會保留還原者、伺服器時間、IP 與原因。</span></div> : null}
+              {actionError ? <div className="manual-entry-error" role="alert">{actionError}</div> : null}
+              <footer className="manual-entry-form-actions">
+                <button type="button" className="manual-entry-cancel" onClick={awaitingFinalDeleteConfirmation ? () => { setAwaitingFinalDeleteConfirmation(false); setActionError(""); } : closeRecordAction} disabled={actionSaving}>{awaitingFinalDeleteConfirmation ? "返回檢查" : "取消"}</button>
+                <button type="submit" className={recordAction.kind === "delete" ? "monitor-delete-confirm" : "monitor-restore-confirm"} disabled={actionSaving}>{actionSaving ? "處理中…" : recordAction.kind === "delete" ? awaitingFinalDeleteConfirmation ? "確定移至垃圾桶" : "繼續刪除" : "確認還原紀錄"}</button>
               </footer>
             </form>
           </section>

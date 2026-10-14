@@ -122,6 +122,10 @@ export const railWearRecords = sqliteTable("rail_wear_records", {
   note: text("note"),
   createdBy: text("created_by").notNull(),
   createdIp: text("created_ip").notNull().default("未知"),
+  deletedAt: text("deleted_at"),
+  deletedBy: text("deleted_by"),
+  deletedIp: text("deleted_ip"),
+  deleteReason: text("delete_reason"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   uniqueIndex("rail_wear_records_location_date_uidx").on(
@@ -139,12 +143,27 @@ export const railWearRecords = sqliteTable("rail_wear_records", {
     table.measuredAt,
   ),
   index("idx_rail_wear_records_created_at").on(table.createdAt),
+  index("idx_rail_wear_records_deleted_at").on(table.deletedAt),
   check("rail_wear_records_mode_valid", sql`${table.mode} IN ('tread', 'side')`),
   check("rail_wear_records_direction_valid", sql`${table.direction} IN ('up', 'down')`),
   check("rail_wear_records_point_positive", sql`${table.pointNumber} > 0`),
   check("rail_wear_records_side_valid", sql`${table.railSide} IN ('left', 'right')`),
   check("rail_wear_records_wear_nonnegative", sql`${table.wear} >= 0`),
   check("rail_wear_records_type_valid", sql`${table.recordType} IN ('measurement', 'replacement')`),
+]);
+
+export const railWearLifecycleEvents = sqliteTable("rail_wear_lifecycle_events", {
+  id: text("id").primaryKey(),
+  recordId: text("record_id").notNull().references(() => railWearRecords.id),
+  action: text("action").notNull(),
+  reason: text("reason").notNull(),
+  actor: text("actor").notNull(),
+  sourceIp: text("source_ip").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("idx_rail_wear_lifecycle_record_created_at").on(table.recordId, table.createdAt),
+  index("idx_rail_wear_lifecycle_created_at").on(table.createdAt),
+  check("rail_wear_lifecycle_action_valid", sql`${table.action} IN ('deleted', 'restored')`),
 ]);
 
 export const railWearRevisions = sqliteTable("rail_wear_revisions", {

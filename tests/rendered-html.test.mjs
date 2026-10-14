@@ -612,6 +612,8 @@ test("stores editable rail-wear measurements and explicit replacement events", a
   const route = await readFile(new URL("../app/api/rail-wear/route.ts", import.meta.url), "utf8");
   const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
   const migration = await readFile(new URL("../drizzle/0011_cultured_stick.sql", import.meta.url), "utf8");
+  const lifecycleMigration = await readFile(new URL("../drizzle/0012_secret_beast.sql", import.meta.url), "utf8");
+  const proxy = await readFile(new URL("../proxy.ts", import.meta.url), "utf8");
 
   assert.match(html, /登記磨耗/);
   assert.match(html, /登記換軌/);
@@ -624,13 +626,31 @@ test("stores editable rail-wear measurements and explicit replacement events", a
   assert.match(route, /INSERT INTO rail_wear_revisions/);
   assert.match(route, /rail_wear\.rail_replaced/);
   assert.match(route, /USER_SELF_EDIT_WINDOW_MS = 30 \* 60 \* 1000/);
-  assert.doesNotMatch(route, /UPDATE rail_wear_records/);
+  assert.match(route, /export async function DELETE/);
+  assert.match(route, /export async function PUT/);
+  assert.match(route, /SET deleted_at = \?, deleted_by = \?, deleted_ip = \?, delete_reason = \?/);
+  assert.match(route, /SET deleted_at = NULL, deleted_by = NULL, deleted_ip = NULL, delete_reason = NULL/);
+  assert.match(route, /rail_wear\.record_soft_deleted/);
+  assert.match(route, /rail_wear\.record_restored/);
+  assert.doesNotMatch(route, /DELETE FROM rail_wear_records/);
+  assert.match(page, /method: recordAction\.kind === "delete" \? "DELETE" : "PUT"/);
+  assert.match(page, /失效紀錄（不參與預測）/);
+  assert.match(page, /確定移至垃圾桶/);
+  assert.match(page, /確認還原紀錄/);
+  assert.match(page, /const canDelete = signedInUser\?\.role === "userpro"/);
+  assert.match(page, /const canRestore = signedInUser\?\.role === "supervisor"/);
   assert.match(schema, /sqliteTable\("rail_wear_records"/);
   assert.match(schema, /sqliteTable\("rail_wear_revisions"/);
+  assert.match(schema, /sqliteTable\("rail_wear_lifecycle_events"/);
+  assert.match(lifecycleMigration, /ALTER TABLE `rail_wear_records` ADD `deleted_at` text/);
+  assert.match(lifecycleMigration, /CREATE TABLE `rail_wear_lifecycle_events`/);
+  assert.match(proxy, /pathname === "\/api\/rail-wear" && request\.method === "DELETE"/);
+  assert.match(proxy, /pathname === "\/api\/rail-wear" && request\.method === "PUT"/);
 
   const database = new DatabaseSync(":memory:");
   try {
     database.exec(migration.replaceAll("--> statement-breakpoint", ""));
+    database.exec(lifecycleMigration.replaceAll("--> statement-breakpoint", ""));
     database.prepare(`INSERT INTO rail_wear_records
       (id, mode, direction, point_number, rail_side, measured_at, wear, inspector, method, record_type, note, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -651,6 +671,12 @@ test("stores editable rail-wear measurements and explicit replacement events", a
       (id, mode, direction, point_number, rail_side, measured_at, wear, inspector, method, record_type, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run("WEAR-DUP", "side", "up", 5, "left", "2026-10-06", 0.2, "tester", "手工工具量測", "measurement", "admin"));
+    database.prepare("UPDATE rail_wear_records SET deleted_at = ?, deleted_by = ?, deleted_ip = ?, delete_reason = ? WHERE id = ?")
+      .run("2026-10-14T09:00:00.000Z", "supervisor", "2001:db8::1", "誤登換軌", "WEAR-2");
+    database.prepare("INSERT INTO rail_wear_lifecycle_events (id, record_id, action, reason, actor, source_ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("WEAR-LIFE-1", "WEAR-2", "deleted", "誤登換軌", "supervisor", "2001:db8::1", "2026-10-14T09:00:00.000Z");
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM rail_wear_records WHERE deleted_at IS NULL").get().count, 1);
+    assert.equal(database.prepare("SELECT action FROM rail_wear_lifecycle_events WHERE record_id = ?").get("WEAR-2").action, "deleted");
   } finally {
     database.close();
   }

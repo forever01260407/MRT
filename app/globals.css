@@ -1667,7 +1667,23 @@ button:focus-visible {
 .wear-row-note { margin-top: 4px; display: block; max-width: 250px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 .wear-correction-button { min-height: 32px; padding: 6px 10px; border: 1px solid #cbc5ff; border-radius: 8px; color: #4f46d8; background: #f4f2ff; font-size: 10px; font-weight: 900; cursor: pointer; }
 .wear-correction-button:hover { border-color: #7569e8; background: #ece9ff; }
+.wear-row-actions { display: flex; align-items: center; gap: 6px; }
+.wear-delete-button, .wear-restore-button { min-height: 32px; padding: 6px 10px; border-radius: 8px; font-size: 10px; font-weight: 900; cursor: pointer; }
+.wear-delete-button { border: 1px solid #ffc0cc; color: #b32643; background: #fff3f6; }
+.wear-delete-button:hover { border-color: var(--danger); background: #ffe8ed; }
+.wear-restore-button { border: 1px solid #a7dfcc; color: #087453; background: #f3fcf8; }
+.wear-restore-button:hover { border-color: var(--success); background: #e7f8f1; }
 .wear-no-action { color: #a1acbc; }
+.wear-trash-section { margin-top: 18px; padding-top: 18px; border-top: 1px dashed #ffc0cc; }
+.wear-trash-section > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.wear-trash-section h4 { margin: 4px 0 0; color: var(--ink); font-size: 15px; }
+.wear-trash-section > header > strong { min-width: 48px; padding: 6px 10px; border-radius: 999px; color: #b32643; background: #fff0f3; text-align: center; font-size: 11px; }
+.wear-trash-table-shell { margin-top: 12px; border-color: #ffd0d9; }
+.wear-trash-table { min-width: 820px; }
+.wear-deleted-row { background: #fffafb; }
+.wear-trash-reason { max-width: 250px; white-space: normal !important; line-height: 1.5; }
+.wear-event-badge.deleted { color: #b32643; background: #ffe7ec; box-shadow: inset 0 0 0 1px #ffc0cc; }
+.wear-trash-empty { margin: 12px 0 0; padding: 14px; border: 1px dashed #dfe4ec; border-radius: 10px; color: var(--muted); background: #fbfcfe; font-size: 11px; }
 .wear-entry-modal { width: min(650px, calc(100vw - 40px)); }
 .wear-entry-form { gap: 14px; }
 .manual-entry-field textarea {
