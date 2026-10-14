@@ -1020,7 +1020,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
       <header className="topbar">
         <div className="brand-block">
           <div className="brand-mark wear-brand-mark" aria-hidden="true"><span></span><span></span></div>
-          <div><p className="eyebrow">NEW TAIPEI METRO · O&amp;M</p><h1>環狀線鋼軌狀態監測中心</h1></div>
+          <div><p className="eyebrow">NEW TAIPEI METRO · O&amp;M</p><h1>環狀線軌道狀態監測系統</h1></div>
         </div>
         <nav className="topnav" aria-label="主要功能">
           <Link href="/" className="nav-item">潤滑設備總覽</Link>

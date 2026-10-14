@@ -154,7 +154,8 @@ test("server-renders the rail lubrication monitoring dashboard", async () => {
 
   const html = await response.text();
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  assert.match(html, /<title>環狀線鋼軌狀態監測中心<\/title>/i);
+  assert.match(html, /<title>環狀線軌道狀態監測系統<\/title>/i);
+  assert.match(page, /submission\.status === "已失效" \? "請洽 POWER USER 還原" : "請洽 AD USER 更正"/);
   assert.match(page, /匯入潤滑設備 Excel/);
   assert.match(html, /現場登記/);
   assert.match(html, /登記現場量測/);

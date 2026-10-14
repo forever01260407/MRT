@@ -1576,7 +1576,7 @@ export default function Home() {
           <div className="brand-mark" aria-hidden="true"><span></span><span></span></div>
           <div>
             <p className="eyebrow">NEW TAIPEI METRO · O&amp;M</p>
-            <h1>環狀線鋼軌狀態監測中心</h1>
+            <h1>環狀線軌道狀態監測系統</h1>
           </div>
         </div>
         <nav className="topnav" aria-label="主要功能">
@@ -1692,7 +1692,7 @@ export default function Home() {
                     <td><span className={isEditable ? "editable" : "locked"}>{editWindowLabel(submission.editableUntil, submissionClock)}</span><small>{submission.status}</small></td>
                     <td>{isEditable
                       ? <button type="button" className="edit" onClick={() => openSubmissionEdit(submission)}>修改</button>
-                      : <span className="contact-ad-user">請洽 AD USER</span>}</td>
+                      : <span className="contact-ad-user">{submission.status === "已失效" ? "請洽 POWER USER 還原" : "請洽 AD USER 更正"}</span>}</td>
                   </tr>;
                 })}</tbody>
               </table>
