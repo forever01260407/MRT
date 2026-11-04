@@ -74,7 +74,7 @@ const USERS_TABLE_SQL = `CREATE TABLE IF NOT EXISTS users (
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT users_role_valid CHECK(role IN ('user', 'userpro', 'supervisor', 'admin')),
+  CONSTRAINT users_role_valid CHECK(role IN ('guest', 'user', 'userpro', 'supervisor', 'admin')),
   CONSTRAINT users_status_valid CHECK(status IN ('active', 'pending', 'locked', 'disabled')),
   CONSTRAINT users_force_password_change_valid CHECK(force_password_change IN (0, 1)),
   CONSTRAINT users_password_iterations_positive CHECK(password_iterations > 0)
@@ -362,7 +362,7 @@ export async function listUsers(database: Database) {
         password_iterations, session_version, force_password_change, last_login_at, created_by, created_at, updated_at
       FROM users
       WHERE username != ? COLLATE NOCASE
-      ORDER BY CASE role WHEN 'admin' THEN 1 WHEN 'supervisor' THEN 2 WHEN 'userpro' THEN 3 ELSE 4 END, created_at ASC`,
+      ORDER BY CASE role WHEN 'admin' THEN 1 WHEN 'supervisor' THEN 2 WHEN 'userpro' THEN 3 WHEN 'user' THEN 4 ELSE 5 END, created_at ASC`,
     ).bind(ROOT_USERNAME).all<StoredUserRow>(),
     database.prepare(
       `SELECT created_at FROM sign_in_events

@@ -200,6 +200,7 @@ function recordKey(record: Pick<RailWearRecordFields, "mode" | "direction" | "po
 }
 
 function canEditRecord(actor: { username: string; role: string }, record: Pick<RailWearRecord, "createdBy" | "createdAt">) {
+  if (actor.role === "guest") return false;
   if (actor.role !== "user") return true;
   const createdAt = parseStoredTimestamp(record.createdAt);
   return record.createdBy.trim().toLowerCase() === actor.username.trim().toLowerCase()
@@ -316,6 +317,9 @@ export async function POST(request: Request) {
   try {
     const actor = await getActiveRequestUser(request);
     if (!actor) return Response.json({ error: "請先登入後登記軌道磨耗。" }, { status: 401 });
+    if (actor.role === "guest") {
+      return Response.json({ error: "GUEST 只能查看軌道磨耗資料，不能新增記錄。" }, { status: 403 });
+    }
     const fields = normalizeFields(await request.json());
     const effectiveFields = actor.role === "user" ? { ...fields, inspector: actor.name } : fields;
     const database = await getD1();
@@ -382,6 +386,9 @@ export async function PATCH(request: Request) {
   try {
     const actor = await getActiveRequestUser(request);
     if (!actor) return Response.json({ error: "請先登入後更正軌道磨耗。" }, { status: 401 });
+    if (actor.role === "guest") {
+      return Response.json({ error: "GUEST 只能查看軌道磨耗資料，不能更正記錄。" }, { status: 403 });
+    }
     const raw = await request.json() as Record<string, unknown>;
     const recordId = String(raw.recordId ?? "").trim();
     const correctionReason = String(raw.correctionReason ?? "").trim();

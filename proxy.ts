@@ -75,30 +75,33 @@ export async function proxy(request: NextRequest) {
       return NextResponse.json({ error: "只有 ADMIN 或 ROOT 可以使用帳號管理功能。" }, { status: 403 });
     }
 
-    if ((pathname === "/monitor" || pathname.startsWith("/monitor/")) && effectiveSession.role === "user") {
+    if ((pathname === "/monitor" || pathname.startsWith("/monitor/"))
+      && (effectiveSession.role === "guest" || effectiveSession.role === "user")) {
       return NextResponse.redirect(new URL("/forbidden", request.url));
     }
 
     if (pathname === "/api/device-axle-profiles" && request.method === "PUT"
-      && (effectiveSession.role === "user" || effectiveSession.role === "userpro")) {
+      && (effectiveSession.role === "guest" || effectiveSession.role === "user" || effectiveSession.role === "userpro")) {
       return NextResponse.json({ error: "目前角色沒有修改階軸設定的權限。" }, { status: 403 });
     }
 
-    if (pathname === "/api/lubrication" && request.method === "DELETE" && effectiveSession.role === "user") {
+    if (pathname === "/api/lubrication" && request.method === "DELETE"
+      && (effectiveSession.role === "guest" || effectiveSession.role === "user")) {
       return NextResponse.json({ error: "只有 AD USER、POWER USER 或 ADMIN 可以刪除紀錄。" }, { status: 403 });
     }
 
     if (pathname === "/api/lubrication" && request.method === "PUT"
-      && (effectiveSession.role === "user" || effectiveSession.role === "userpro")) {
+      && (effectiveSession.role === "guest" || effectiveSession.role === "user" || effectiveSession.role === "userpro")) {
       return NextResponse.json({ error: "只有 POWER USER 或 ADMIN 可以從垃圾桶還原紀錄。" }, { status: 403 });
     }
 
-    if (pathname === "/api/rail-wear" && request.method === "DELETE" && effectiveSession.role === "user") {
+    if (pathname === "/api/rail-wear" && request.method === "DELETE"
+      && (effectiveSession.role === "guest" || effectiveSession.role === "user")) {
       return NextResponse.json({ error: "只有 AD USER、POWER USER、ADMIN 或 ROOT 可以刪除軌道紀錄。" }, { status: 403 });
     }
 
     if (pathname === "/api/rail-wear" && request.method === "PUT"
-      && (effectiveSession.role === "user" || effectiveSession.role === "userpro")) {
+      && (effectiveSession.role === "guest" || effectiveSession.role === "user" || effectiveSession.role === "userpro")) {
       return NextResponse.json({ error: "只有 POWER USER、ADMIN 或 ROOT 可以從垃圾桶還原軌道紀錄。" }, { status: 403 });
     }
 

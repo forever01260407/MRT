@@ -488,6 +488,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
   const [actionSaving, setActionSaving] = useState(false);
   const [awaitingFinalDeleteConfirmation, setAwaitingFinalDeleteConfirmation] = useState(false);
   const config = wearModeConfig[mode];
+  const canWriteData = Boolean(signedInUser && signedInUser.role !== "guest");
   const canDelete = signedInUser?.role === "userpro" || signedInUser?.role === "supervisor" || signedInUser?.role === "admin" || signedInUser?.role === "root";
   const canRestore = signedInUser?.role === "supervisor" || signedInUser?.role === "admin" || signedInUser?.role === "root";
   const monitorPoints = useMemo(() => {
@@ -707,6 +708,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
   };
 
   const openNewEntry = (recordType: RailWearRecordType) => {
+    if (!canWriteData) return;
     setEditingRecordId(null);
     setEntryFeedback("");
     setEntryForm({
@@ -1103,8 +1105,8 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
               <div><span className="panel-kicker">目前選取 · {directionText[selectedPoint.direction]}{sideText[selectedRailSide]} · {config.measurement}</span><h3>{selectedDisplayCode}｜監測點 {selectedPoint.number}｜{selectedPoint.from.id} {selectedPoint.from.name}－{selectedPoint.to.id} {selectedPoint.to.name}</h3></div>
               <div className="wear-detail-actions">
                 <span className={`status-pill ${selectedStatus}`}>{statusText[selectedStatus]}</span>
-                <button type="button" className="wear-entry-button" onClick={() => openNewEntry("measurement")}>＋ 登記磨耗</button>
-                <button type="button" className="wear-replacement-button" onClick={() => openNewEntry("replacement")}>↺ 登記換軌</button>
+                {canWriteData ? <button type="button" className="wear-entry-button" onClick={() => openNewEntry("measurement")}>＋ 登記磨耗</button> : null}
+                {canWriteData ? <button type="button" className="wear-replacement-button" onClick={() => openNewEntry("replacement")}>↺ 登記換軌</button> : null}
               </div>
             </div>
 
@@ -1235,7 +1237,7 @@ export default function WearOverviewPage({ mode = "tread" }: { mode?: WearMode }
         </section>
       </section>
 
-      {entryForm ? (
+      {canWriteData && entryForm ? (
         <div className="manual-entry-backdrop wear-entry-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeEntry(); }}>
           <section className="manual-entry-modal wear-entry-modal" role="dialog" aria-modal="true" aria-labelledby="wear-entry-title" aria-describedby="wear-entry-description">
             <header className="manual-entry-modal-header">

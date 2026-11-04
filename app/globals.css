@@ -532,6 +532,7 @@ button:focus-visible {
 
 .session-menu-loading { width: 142px; opacity: .55; }
 .session-role-mark { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: #fff; background: #667085; font-size: 9px; font-weight: 950; letter-spacing: .04em; }
+.session-role-mark.guest { background: #475467; }
 .session-role-mark.userpro { background: #2563eb; }
 .session-role-mark.supervisor { background: #c2410c; }
 .session-role-mark.admin { background: #c62845; }
@@ -540,6 +541,7 @@ button:focus-visible {
 .session-identity strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .session-identity small { display: flex; align-items: center; gap: 5px; color: #aaa9d8; font-size: 8px; letter-spacing: .05em; white-space: nowrap; }
 .role-display-badge { min-height: 18px; padding: 3px 7px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #667085; border-radius: 5px; color: #fff; background: #667085; font-size: 8px; font-weight: 950; line-height: 1; letter-spacing: .045em; white-space: nowrap; }
+.role-display-badge.guest { border-color: #475467; background: #475467; }
 .role-display-badge.user { border-color: #667085; background: #667085; }
 .role-display-badge.userpro { border-color: #2563eb; background: #2563eb; }
 .role-display-badge.supervisor { border-color: #c2410c; background: #c2410c; }
@@ -2005,6 +2007,7 @@ button:focus-visible {
 .admin-attention-list small { overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .admin-attention-list b { color: #b1b8c5; font-size: 15px; font-weight: 500; }
 .admin-user-avatar { width: 32px; height: 32px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 9px; color: #fff; background: #667085; font-size: 8px; font-weight: 950; }
+.admin-user-avatar.guest { background: #475467; }
 .admin-user-avatar.userpro { background: #2563eb; }
 .admin-user-avatar.supervisor { background: #c2410c; }
 .admin-user-avatar.admin { background: #c62845; }
@@ -2051,6 +2054,7 @@ button:focus-visible {
 .admin-user-cell small { color: var(--muted); font-size: 8px; }
 .admin-username { color: var(--ink-soft); font-size: 9px; }
 .admin-role-badge { border: 1px solid #667085; border-radius: 5px; color: #fff; background: #667085; letter-spacing: .035em; }
+.admin-role-badge.guest { border-color: #475467; background: #475467; }
 .admin-role-badge.user { border-color: #667085; background: #667085; }
 .admin-role-badge.userpro { border-color: #2563eb; background: #2563eb; }
 .admin-role-badge.supervisor { border-color: #c2410c; background: #c2410c; }
@@ -2061,9 +2065,10 @@ button:focus-visible {
 .admin-empty { padding: 36px; display: grid; justify-items: center; gap: 4px; color: var(--muted); text-align: center; }
 .admin-empty strong { color: var(--ink); font-size: 11px; }
 .admin-empty p { margin: 0; font-size: 9px; }
-.admin-role-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; }
+.admin-role-overview { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 11px; }
 .admin-role-overview article { padding: 13px; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
 .admin-role-overview article > span { width: 34px; height: 34px; grid-row: span 2; display: grid; place-items: center; border-radius: 9px; color: #fff; background: #667085; font-size: 9px; font-weight: 950; }
+.admin-role-overview article.guest > span { background: #475467; }
 .admin-role-overview article.supervisor > span { background: #c2410c; }
 .admin-role-overview article.admin > span { background: #c62845; }
 .admin-role-overview article.root > span { color: #1d1938; background: #f2c66d; box-shadow: inset 0 0 0 1px #d7a72e; }

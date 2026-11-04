@@ -1,7 +1,7 @@
 export const AUTH_COOKIE_NAME = "mrt_monitor_session";
 export const AUTH_SESSION_SECONDS = 8 * 60 * 60;
 
-export type AuthRole = "user" | "userpro" | "supervisor" | "admin" | "root";
+export type AuthRole = "guest" | "user" | "userpro" | "supervisor" | "admin" | "root";
 
 export const ROOT_USERNAME = "root";
 export const ROOT_USER_ID = "SYSTEM-ROOT";
@@ -200,7 +200,7 @@ function isStoredSession(value: unknown): value is StoredSession {
   return session.version === 2
     && typeof session.username === "string"
     && typeof session.name === "string"
-    && (session.role === "user" || session.role === "userpro" || session.role === "supervisor" || session.role === "admin" || session.role === "root")
+    && (session.role === "guest" || session.role === "user" || session.role === "userpro" || session.role === "supervisor" || session.role === "admin" || session.role === "root")
     && typeof session.sessionVersion === "number"
     && Number.isInteger(session.sessionVersion)
     && session.sessionVersion > 0

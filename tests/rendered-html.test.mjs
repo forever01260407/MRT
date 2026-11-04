@@ -157,10 +157,11 @@ test("server-renders the rail lubrication monitoring dashboard", async () => {
   assert.match(html, /<title>環狀線軌道狀態監測系統<\/title>/i);
   assert.match(page, /submission\.status === "已失效" \? "請洽 POWER USER 還原" : "請洽 AD USER 更正"/);
   assert.match(page, /匯入潤滑設備 Excel/);
-  assert.match(html, /現場登記/);
-  assert.match(html, /登記現場量測/);
+  assert.match(page, /現場登記/);
+  assert.match(page, /登記現場量測/);
   assert.match(page, /Monitor Area/);
   assert.match(page, /階軸設定/);
+  assert.match(page, /const canWriteData/);
   assert.match(page, /const canImportExcel/);
   assert.match(page, /const canConfigureAxle/);
   assert.match(page, /const canOpenMonitor/);
@@ -310,12 +311,14 @@ test("server-renders the operational admin area framework", async () => {
   assert.match(page, /登入有效時間/);
   assert.match(page, /8 小時後重新登入/);
   assert.match(page, /AD USER－匯入、更正與軟刪除/);
+  assert.match(page, /GUEST－僅查看監測總覽/);
   assert.match(page, /功能權限矩陣/);
-  assert.match(page, /label: "查看完整資料紀錄", group: "監測", user: false, userpro: true, supervisor: true, admin: true/);
-  assert.match(page, /label: "修改自己 30 分鐘內的提交", group: "資料", user: true, userpro: true, supervisor: true, admin: true/);
-  assert.match(page, /label: "軟刪除紀錄", group: "高風險", user: false, userpro: true, supervisor: true, admin: true/);
-  assert.match(page, /label: "從垃圾桶還原紀錄", group: "高風險", user: false, userpro: false, supervisor: true, admin: true/);
+  assert.match(page, /label: "查看完整資料紀錄", group: "監測", guest: false, user: false, userpro: true, supervisor: true, admin: true/);
+  assert.match(page, /label: "修改自己 30 分鐘內的提交", group: "資料", guest: false, user: true, userpro: true, supervisor: true, admin: true/);
+  assert.match(page, /label: "軟刪除紀錄", group: "高風險", guest: false, user: false, userpro: true, supervisor: true, admin: true/);
+  assert.match(page, /label: "從垃圾桶還原紀錄", group: "高風險", guest: false, user: false, userpro: false, supervisor: true, admin: true/);
   assert.doesNotMatch(page.slice(page.indexOf("const permissions"), page.indexOf("const signInOutcomeLabels")), /管理 ADMIN 帳號/);
+  assert.match(rolePresentation, /guest: "GUEST"/);
   assert.match(rolePresentation, /user: "USER"/);
   assert.match(rolePresentation, /userpro: "AD USER"/);
   assert.match(rolePresentation, /supervisor: "POWER USER"/);
@@ -324,6 +327,7 @@ test("server-renders the operational admin area framework", async () => {
   assert.match(authChrome, /getRoleDisplayLabel\(user\.role\)/);
   assert.match(page, /getRoleDisplayLabel\(user\.role\)/);
   assert.match(page, /getRoleDisplayLabel\(role\)/);
+  assert.match(styles, /\.role-display-badge\.guest \{[^}]*#475467/);
   assert.match(styles, /\.role-display-badge\.user \{[^}]*#667085/);
   assert.match(styles, /\.role-display-badge\.userpro \{[^}]*#2563eb/);
   assert.match(styles, /\.role-display-badge\.supervisor \{[^}]*#c2410c/);
@@ -335,6 +339,68 @@ test("server-renders the operational admin area framework", async () => {
   assert.match(page, /系統時間/);
   assert.match(page, /placeholder="由 ADMIN 自行設定"/);
   assert.doesNotMatch(page, /minLength=|至少 8 個字元/);
+});
+
+test("adds a read-only GUEST role across UI, APIs, and the users schema", async () => {
+  const auth = await readFile(new URL("../app/lib/auth.ts", import.meta.url), "utf8");
+  const dashboard = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const wearPage = await readFile(new URL("../app/wear/page.tsx", import.meta.url), "utf8");
+  const lubricationRoute = await readFile(new URL("../app/api/lubrication/route.ts", import.meta.url), "utf8");
+  const railWearRoute = await readFile(new URL("../app/api/rail-wear/route.ts", import.meta.url), "utf8");
+  const axleRoute = await readFile(new URL("../app/api/device-axle-profiles/route.ts", import.meta.url), "utf8");
+  const adminRoute = await readFile(new URL("../app/api/admin/users/route.ts", import.meta.url), "utf8");
+  const proxy = await readFile(new URL("../proxy.ts", import.meta.url), "utf8");
+  const migration = await readFile(new URL("../drizzle/0013_daily_franklin_richards.sql", import.meta.url), "utf8");
+
+  assert.match(auth, /AuthRole = "guest" \| "user"/);
+  assert.match(dashboard, /signedInUser\.role !== "guest"/);
+  assert.match(dashboard, /canWriteData \? <div className=\{`data-entry-grid/);
+  assert.match(dashboard, /canWriteData \? <section className=\{`my-submissions-panel/);
+  assert.match(wearPage, /signedInUser\.role !== "guest"/);
+  assert.match(wearPage, /canWriteData \? <button[^>]*wear-entry-button/);
+  assert.match(lubricationRoute, /actor\.role === "guest"[^]*GUEST 只能查看監測總覽/);
+  assert.match(railWearRoute, /if \(actor\.role === "guest"\) return false/);
+  assert.match(railWearRoute, /GUEST 只能查看軌道磨耗資料/);
+  assert.match(axleRoute, /actor\.role === "guest"/);
+  assert.match(adminRoute, /role !== "guest"/);
+  assert.match(proxy, /effectiveSession\.role === "guest"/);
+  assert.match(migration, /IN \('guest', 'user', 'userpro', 'supervisor', 'admin'\)/);
+
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec(`
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        username TEXT NOT NULL,
+        role TEXT NOT NULL,
+        status TEXT DEFAULT 'active' NOT NULL,
+        password_hash TEXT NOT NULL,
+        password_salt TEXT NOT NULL,
+        password_iterations INTEGER NOT NULL,
+        session_version INTEGER DEFAULT 1 NOT NULL,
+        force_password_change INTEGER DEFAULT 1 NOT NULL,
+        last_login_at TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+      );
+      CREATE UNIQUE INDEX users_username_uidx ON users(username);
+      INSERT INTO users (id, name, username, role, password_hash, password_salt, password_iterations, created_by)
+      VALUES ('USR-EXISTING', 'user', 'user', 'user', 'hash', 'salt', 100000, 'root');
+    `);
+    database.exec(migration.replaceAll("--> statement-breakpoint", ""));
+    database.prepare(`INSERT INTO users
+      (id, name, username, role, password_hash, password_salt, password_iterations, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run("USR-GUEST", "guest", "guest", "guest", "hash", "salt", 100000, "root");
+    assert.deepEqual(database.prepare("SELECT username, role FROM users ORDER BY username").all().map((row) => ({ ...row })), [
+      { username: "guest", role: "guest" },
+      { username: "user", role: "user" },
+    ]);
+  } finally {
+    database.close();
+  }
 });
 
 test("persists admin-created accounts in D1 and uses them for login", async () => {
@@ -411,7 +477,7 @@ test("reserves one owner-bound ROOT and prevents ADMIN accounts from controlling
   assert.match(userStore, /row\.role === "admin" && actor\.role !== "root"/);
   assert.match(adminRoute, /isAdministratorRole/);
   assert.match(adminPage, /ROOT 是唯一系統保留帳號，不會出現在可建立角色中/);
-  assert.match(adminPage, /const permissionRoles = \["user", "userpro", "supervisor", "admin"\]/);
+  assert.match(adminPage, /const permissionRoles = \["guest", "user", "userpro", "supervisor", "admin"\]/);
   assert.doesNotMatch(adminPage.slice(adminPage.indexOf("const permissions"), adminPage.indexOf("const signInOutcomeLabels")), /管理 ADMIN 帳號|root:/);
   assert.doesNotMatch(createAccountMarkup, /option value="root"/);
   assert.doesNotMatch(migration, /'root'/);
@@ -437,7 +503,7 @@ test("persists password resets, role changes, and account disabling without expo
   assert.doesNotMatch(page, /強制登出/);
 });
 
-test("lets every signed-in non-root account change its own password without a length rule", async () => {
+test("lets non-guest, non-root accounts change their own password without a length rule", async () => {
   const route = await readFile(new URL("../app/api/account/password/route.ts", import.meta.url), "utf8");
   const sessionMenu = await readFile(new URL("../app/components/AuthSessionProvider.tsx", import.meta.url), "utf8");
   const loginPage = await readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8");
@@ -452,7 +518,9 @@ test("lets every signed-in non-root account change its own password without a le
   assert.match(route, /newPassword !== confirmPassword/);
   assert.match(route, /serializeExpiredSessionCookie/);
   assert.match(sessionMenu, /更換自己的密碼/);
-  assert.match(sessionMenu, /user\.role !== "root"/);
+  assert.match(sessionMenu, /user\.role !== "guest" && user\.role !== "root"/);
+  assert.match(route, /actor\.role === "guest"/);
+  assert.match(route, /GUEST 為唯讀帳號/);
   assert.match(sessionMenu, /密碼不限制長度或字元組合，但不能與目前密碼相同/);
   assert.doesNotMatch(`${route}\n${sessionMenu}`, /minLength=|至少 8 個字元/);
   assert.match(loginPage, /密碼已更新，請使用新密碼重新登入/);
@@ -617,7 +685,6 @@ test("colors current rail status surfaces from the projected value", async () =>
 test("stores editable rail-wear measurements and explicit replacement events", async () => {
   const response = await render("/wear");
   assert.equal(response.status, 200);
-  const html = await response.text();
   const page = await readFile(new URL("../app/wear/page.tsx", import.meta.url), "utf8");
   const route = await readFile(new URL("../app/api/rail-wear/route.ts", import.meta.url), "utf8");
   const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
@@ -625,8 +692,8 @@ test("stores editable rail-wear measurements and explicit replacement events", a
   const lifecycleMigration = await readFile(new URL("../drizzle/0012_secret_beast.sql", import.meta.url), "utf8");
   const proxy = await readFile(new URL("../proxy.ts", import.meta.url), "utf8");
 
-  assert.match(html, /登記磨耗/);
-  assert.match(html, /登記換軌/);
+  assert.match(page, /登記磨耗/);
+  assert.match(page, /登記換軌/);
   assert.match(page, /fetch\(`\/api\/rail-wear\?mode=\$\{mode\}`/);
   assert.match(page, /method: editingRecordId \? "PATCH" : "POST"/);
   assert.match(page, /predictionHistory = history\.slice\(lastReplacementIndex/);
@@ -744,7 +811,7 @@ test("lets POWER USER, ADMIN, and ROOT move records to Trash and restore them", 
   assert.match(migration, /ALTER TABLE `device_axle_profile_events` ADD `source_ip`/);
   assert.match(proxy, /pathname === "\/api\/lubrication" && request\.method === "DELETE"/);
   assert.match(proxy, /pathname === "\/api\/lubrication" && request\.method === "PUT"/);
-  assert.match(proxy, /effectiveSession\.role === "user" \|\| effectiveSession\.role === "userpro"/);
+  assert.match(proxy, /effectiveSession\.role === "guest" \|\| effectiveSession\.role === "user" \|\| effectiveSession\.role === "userpro"/);
 
   const worker = await loadWorker();
   const userCookie = await login(worker, "user", "user");
@@ -862,13 +929,13 @@ test("enables AD USER with the agreed data permissions while reserving axle and 
   const auditMigration = await readFile(new URL("../drizzle/0008_lying_slayback.sql", import.meta.url), "utf8");
   const migration = await readFile(new URL("../drizzle/0009_glorious_maggott.sql", import.meta.url), "utf8");
 
-  assert.match(auth, /export type AuthRole = "user" \| "userpro" \| "supervisor" \| "admin" \| "root"/);
+  assert.match(auth, /export type AuthRole = "guest" \| "user" \| "userpro" \| "supervisor" \| "admin" \| "root"/);
   assert.match(adminRoute, /role !== "userpro"/);
   assert.doesNotMatch(adminPage, /userpro" disabled|AD USER（未啟用）|暫不開放指派/);
   assert.match(lubricationRoute, /只有 AD USER、POWER USER、ADMIN 或 ROOT 可以匯入 Excel/);
   assert.match(lubricationRoute, /只有 AD USER、POWER USER、ADMIN 或 ROOT 可以刪除紀錄/);
-  assert.match(axleRoute, /actor\.role === "user" \|\| actor\.role === "userpro"/);
-  assert.match(proxy, /effectiveSession\.role === "user" \|\| effectiveSession\.role === "userpro"/);
+  assert.match(axleRoute, /actor\.role === "guest" \|\| actor\.role === "user" \|\| actor\.role === "userpro"/);
+  assert.match(proxy, /effectiveSession\.role === "guest" \|\| effectiveSession\.role === "user" \|\| effectiveSession\.role === "userpro"/);
   assert.match(migration, /IN \('user', 'userpro', 'supervisor', 'admin'\)/);
 
   const database = new DatabaseSync(":memory:");

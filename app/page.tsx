@@ -657,6 +657,7 @@ function HistoryChart({ devices, expanded = false }: { devices: Device[]; expand
 
 export default function Home() {
   const { user: signedInUser, loading: authLoading } = useAuthSession();
+  const canWriteData = !authLoading && Boolean(signedInUser && signedInUser.role !== "guest");
   const canImportExcel = !authLoading && (signedInUser?.role === "userpro" || signedInUser?.role === "supervisor" || signedInUser?.role === "admin" || signedInUser?.role === "root");
   const canConfigureAxle = !authLoading && (signedInUser?.role === "supervisor" || signedInUser?.role === "admin" || signedInUser?.role === "root");
   const canOpenMonitor = !authLoading && (signedInUser?.role === "userpro" || signedInUser?.role === "supervisor" || signedInUser?.role === "admin" || signedInUser?.role === "root");
@@ -739,7 +740,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (authLoading || !signedInUser) return;
+    if (authLoading || !signedInUser || signedInUser.role === "guest") return;
     const timer = window.setTimeout(() => void loadMySubmissions(), 0);
     return () => window.clearTimeout(timer);
   }, [authLoading, loadMySubmissions, signedInUser]);
@@ -1127,6 +1128,7 @@ export default function Home() {
   };
 
   const openManualEntry = () => {
+    if (!canWriteData) return;
     setEditingSubmission(null);
     setManualEntry({
       deviceId: selectedDevice?.id ?? manualDeviceOptions[0] ?? "",
@@ -1623,7 +1625,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className={`data-entry-grid ${canImportExcel ? "" : "single"}`}>
+        {canWriteData ? <div className={`data-entry-grid ${canImportExcel ? "" : "single"}`}>
           {canImportExcel ? <section className={`excel-import-panel ${excelImport.status}`} aria-labelledby="excel-import-title">
             <div className="excel-import-icon" aria-hidden="true"><span>XL</span></div>
             <div className="excel-import-copy">
@@ -1666,9 +1668,9 @@ export default function Home() {
               <span>{manualEntryFeedback.message}</span>
             </div>
           </section>
-        </div>
+        </div> : null}
 
-        <section className={`my-submissions-panel ${mySubmissionsState.status}`} aria-labelledby="my-submissions-title">
+        {canWriteData ? <section className={`my-submissions-panel ${mySubmissionsState.status}`} aria-labelledby="my-submissions-title">
           <header>
             <div>
               <span className="panel-kicker">MY RECENT SUBMISSIONS</span>
@@ -1704,7 +1706,7 @@ export default function Home() {
             </div>
           )}
           {mySubmissions.length ? <p className={`my-submissions-status ${mySubmissionsState.status}`} role="status">{mySubmissionsState.message}</p> : null}
-        </section>
+        </section> : null}
 
         <section className="summary-grid" aria-label="全線摘要">
           <article className="summary-card danger-card"><span>需處理設備</span><strong>{criticalCount}</strong><small>優先安排現場複查</small></article>
@@ -2115,7 +2117,7 @@ export default function Home() {
           </div>
         ) : null}
 
-        {isManualEntryOpen ? (
+        {canWriteData && isManualEntryOpen ? (
           <div
             className="manual-entry-backdrop"
             onMouseDown={(event) => {

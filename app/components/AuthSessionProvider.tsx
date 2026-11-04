@@ -123,11 +123,11 @@ export function SessionMenu() {
           <small><span className={`role-display-badge ${user.role}`}>{getRoleDisplayLabel(user.role)}</span><span>@{user.username}</span></small>
         </span>
         <span className="session-actions">
-          {user.role !== "root" ? <button type="button" onClick={() => { setPasswordError(""); setPasswordOpen(true); }}>更換密碼</button> : null}
+          {user.role !== "guest" && user.role !== "root" ? <button type="button" onClick={() => { setPasswordError(""); setPasswordOpen(true); }}>更換密碼</button> : null}
           <button type="button" onClick={signOut} disabled={signingOut}>{signingOut ? "登出中" : "登出"}</button>
         </span>
       </div>
-      {passwordOpen ? (
+      {passwordOpen && user.role !== "guest" ? (
         <div className="account-password-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !passwordSubmitting) setPasswordOpen(false); }}>
           <section className="account-password-dialog" role="dialog" aria-modal="true" aria-labelledby="change-password-title">
             <header><div><span>ACCOUNT SECURITY</span><h2 id="change-password-title">更換自己的密碼</h2><p>@{user.username}</p></div><button type="button" onClick={() => setPasswordOpen(false)} disabled={passwordSubmitting} aria-label="關閉更換密碼視窗">×</button></header>

@@ -30,6 +30,10 @@ export async function POST(request: Request) {
   if (!actor) {
     return Response.json({ error: "登入狀態已失效，請重新登入。" }, { status: 401 });
   }
+  if (actor.role === "guest") {
+    await recordRejectedChange(request, actor.username, actor.role, "guest_read_only");
+    return Response.json({ error: "GUEST 為唯讀帳號，請由 ADMIN 或 ROOT 重設密碼。" }, { status: 403 });
+  }
 
   try {
     const payload = await request.json() as Record<string, unknown>;

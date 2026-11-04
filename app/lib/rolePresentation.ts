@@ -1,6 +1,7 @@
-export type RoleCode = "user" | "userpro" | "supervisor" | "admin" | "root";
+export type RoleCode = "guest" | "user" | "userpro" | "supervisor" | "admin" | "root";
 
 export const ROLE_DISPLAY_LABELS: Record<RoleCode, string> = {
+  guest: "GUEST",
   user: "USER",
   userpro: "AD USER",
   supervisor: "POWER USER",
@@ -9,6 +10,7 @@ export const ROLE_DISPLAY_LABELS: Record<RoleCode, string> = {
 };
 
 export const ROLE_DISPLAY_MARKS: Record<RoleCode, string> = {
+  guest: "G",
   user: "U",
   userpro: "AD",
   supervisor: "P",

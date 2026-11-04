@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     if (!password) {
       return Response.json({ error: "請設定登入密碼。" }, { status: 400 });
     }
-    if (role !== "user" && role !== "userpro" && role !== "supervisor" && role !== "admin") {
+    if (role !== "guest" && role !== "user" && role !== "userpro" && role !== "supervisor" && role !== "admin") {
       return Response.json({ error: "指定的角色無法使用。" }, { status: 400 });
     }
 
@@ -131,7 +131,7 @@ export async function PATCH(request: Request) {
 
     if (action === "set_role") {
       const role = String(payload.role ?? "") as AuthRole;
-      if (role !== "user" && role !== "userpro" && role !== "supervisor" && role !== "admin") {
+      if (role !== "guest" && role !== "user" && role !== "userpro" && role !== "supervisor" && role !== "admin") {
         return Response.json({ error: "指定的角色無法使用。" }, { status: 400 });
       }
       const user = await updateStoredUserRole(database, {
