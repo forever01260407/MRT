@@ -1624,6 +1624,10 @@
           "name": "users_status_valid",
           "value": "\"users\".\"status\" IN ('active', 'pending', 'locked', 'disabled')"
         },
+        "users_force_password_change_valid": {
+          "name": "users_force_password_change_valid",
+          "value": "\"users\".\"force_password_change\" IN (0, 1)"
+        },
         "users_password_iterations_positive": {
           "name": "users_password_iterations_positive",
           "value": "\"users\".\"password_iterations\" > 0"

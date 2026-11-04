@@ -216,6 +216,7 @@ export const users = sqliteTable("users", {
   uniqueIndex("users_username_uidx").on(table.username),
   check("users_role_valid", sql`${table.role} IN ('guest', 'user', 'userpro', 'supervisor', 'admin')`),
   check("users_status_valid", sql`${table.status} IN ('active', 'pending', 'locked', 'disabled')`),
+  check("users_force_password_change_valid", sql`${table.forcePasswordChange} IN (0, 1)`),
   check("users_password_iterations_positive", sql`${table.passwordIterations} > 0`),
 ]);
 
